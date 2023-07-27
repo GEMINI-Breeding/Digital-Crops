@@ -1,0 +1,3 @@
+[submodule "Helios"]
+	path = Helios
+	url = git@github.com:PlantSimulationLab/Helios.git
