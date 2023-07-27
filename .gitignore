@@ -33,6 +33,7 @@
 
 # Build folder
 build/
+DigitalSorghum/cmake-build-debug
 
 # Helios files
 Helios
