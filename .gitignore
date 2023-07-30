@@ -5,7 +5,7 @@
 *.slo
 *.lo
 *.o
-*.obj
+# *.obj
 
 # Precompiled Headers
 *.gch
@@ -35,5 +35,4 @@
 build/
 DigitalSorghum/cmake-build-debug
 
-# Helios files
-Helios
+.idea
