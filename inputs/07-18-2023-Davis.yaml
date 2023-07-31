@@ -1,0 +1,39 @@
+---
+  Year: 2023
+  Location: "Davis, CA"
+  UTM_Origin_X: 600000
+  UTM_Origin_Y: 4000000
+  Plants:
+    - Name: "Sorghum"
+      X: 0
+      Y: 0
+      Z: 0
+      Row: 0
+      Column: 0
+      Height: 1.5
+      Diameter: 0.5
+      Leaf_Angle: 45
+      Leaf_Length: 0.5
+      Leaf_Width: 0.5
+      Leaf_Color: "Green"
+      Leaf_Shape: "Lanceolate"
+      Leaf_Area: 0.25
+      Leaf_Mass: 0.25
+      Leaf_Dry_Mass: 0.25 
+      Leaf_Nitrogen_Content: 0.25
+      Leaf_Carbon_Content: 0.25
+      Leaf_Water_Content: 0.25
+      Leaf_Pigment_Content: 0.25
+      Leaf_Pigment_Color: "Green"
+      Leaf_Pigment_Type: "Chlorophyll"
+      Leaf_Pigment_Concentration: 0.25
+
+      Stem_Length: 0.5
+      Stem_Width: 0.5
+      Stem_Color: "Green"
+      Stem_Shape: "Cylindrical"
+      Stem_Area: 0.25
+      Stem_Mass: 0.25
+      Stem_Dry_Mass: 0.25
+      
+ 

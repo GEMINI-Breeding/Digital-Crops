@@ -2,16 +2,24 @@
 #include "CanopyGenerator.h"
 
 #include "main.h"
+#include "yaml-cpp/yaml.h"
 
 using namespace helios;
 
 
-int make_field(Context &context){
+int load_yaml(){
+    YAML::Node lineup = YAML::Load("{1B: Prince Fielder, 2B: Rickie Weeks, LF: Ryan Braun}");
+    for(YAML::const_iterator it=lineup.begin();it!=lineup.end();++it) {
+    std::cout << "Playing at " << it->first.as<std::string>() << " is " << it->second.as<std::string>() << "\n";
+    }
+}
+
+int make_field(Context &context, std::string obj_path){
 
     int n_beds = 2; //6
     int n_rows = 2; // 20
 
-    std::vector<uint> UUIDs = context.loadOBJ("../../DigitalSorghum/obj/dirt_rocks.obj", make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
+    std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
 
     for(int bed = 0;bed < n_beds;bed++){
         for(int row=0;row<n_rows;row++){
@@ -56,11 +64,24 @@ int plant_sorghum(Context &context){
 int main(){
     Context context;
 
+
+    // Get the path of main.cpp
+    std::string path = __FILE__;
+    path = path.substr(0, path.find_last_of("\\/"));
+    // Print path
+    std::cout << path << std::endl;
+    // Object file path
+    std::string obj_path = path + "/obj/dirt_rocks.obj";
+    std::cout << obj_path << std::endl;
+
+    // Read yaml file
+    load_yaml();
+
     // OBJ 3D Model
-    make_field(context);
+    //make_field(context, obj_path);
 
     // Plant sorghum
-    plant_sorghum(context);
+    //plant_sorghum(context);
 
     // Set Visualizer
     Visualizer visualizer(800);
