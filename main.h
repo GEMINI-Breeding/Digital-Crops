@@ -8,6 +8,6 @@
 // Field configuration
 #define BED_HEIGHT 0.2
 #define BED_WIDTH (BED_HEIGHT*10)
-#define BED_LENGTH (BED_HEIGHT*15)
+#define BED_LENGTH (BED_HEIGHT*20)
 
 #endif //HELIOS_MAIN_H

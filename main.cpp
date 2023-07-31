@@ -6,18 +6,40 @@
 
 using namespace helios;
 
+YAML::Node load_yaml(std::string yaml_path){
+    YAML::Node config = YAML::LoadFile(yaml_path);
 
-int load_yaml(){
-    YAML::Node lineup = YAML::Load("{1B: Prince Fielder, 2B: Rickie Weeks, LF: Ryan Braun}");
-    for(YAML::const_iterator it=lineup.begin();it!=lineup.end();++it) {
-    std::cout << "Playing at " << it->first.as<std::string>() << " is " << it->second.as<std::string>() << "\n";
+    // Print all the nodes
+    std::cout << "All nodes: " << config << "\n";
+
+    // Field config
+    std::cout << "Field config: " << "\n";
+    std::cout << "n_beds: " << config["n_beds"] << "\n";
+    std::cout << "n_rows: " << config["n_rows"] << "\n";
+    // std::cout << "bed_width: " << config["bed_width"] << "\n";
+    // std::cout << "bed_length: " << config["bed_length"] << "\n";
+    // std::cout << "bed_height: " << config["bed_height"] << "\n";
+
+
+    if (config["crops"]){
+        // Print all crops using for loop
+        std::cout << "Crops: " << "\n";
+
+        // Get the length of crops
+        int n_crops = config["crops"].size();
+        std::cout << "Number of crops: " << n_crops << "\n";
+
+
     }
+
+    
+    return config;
 }
 
-int make_field(Context &context, std::string obj_path){
+int make_field(Context &context, std::string obj_path, YAML::Node config){
 
-    int n_beds = 2; //6
-    int n_rows = 2; // 20
+    int n_beds = config["n_beds"].as<int>(); //6
+    int n_rows = config["n_rows"].as<int>(); // 20
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
 
@@ -32,7 +54,7 @@ int make_field(Context &context, std::string obj_path){
     }
 }
 
-int plant_sorghum(Context &context){
+int plant_sorghum(Context &context, YAML::Node config){
     // Canopy generator model
     CanopyGenerator canopygenerator(&context);
 
@@ -48,17 +70,29 @@ int plant_sorghum(Context &context){
 
     int n_beds = 2; //6
     int n_rows = 2; // 20
-    for(int bed = 0;bed < n_beds;bed++){
-        for(int row=0;row<n_rows;row++){
-            float x = bed * BED_WIDTH;
-            float y = row * BED_LENGTH;
-            float z = 0;
-            vec3 origin(x,y,z);
-            parameters.canopy_origin = origin;
-            //canopygenerator.sorghum( parameters, origin ); // Gererate a single Sorhgum plant
-            canopygenerator.buildCanopy( parameters);
-        }
+
+    // Plant Sorghum based on the config locations
+    int n_crops = config["crops"].size();
+    for (int i = 0; i < config["crops"].size(); i++){
+        int bed = config["crops"][i]["bed"].as<int>();
+        int row = config["crops"][i]["row"].as<int>();
+
+        // float x = bed * BED_WIDTH;
+        // float y = row * BED_LENGTH;
+        // float z = 0;
+        vec3 origin(-BED_WIDTH/2,-BED_LENGTH/2,0);
+
+        float X = config["crops"][i]["X"].as<float>() / 281 * 2 * BED_WIDTH;
+        float Y = config["crops"][i]["Y"].as<float>() / 376 * BED_LENGTH;
+        // float Z = config["crops"][i]["Z"].as<float>();
+        vec3 plant_origin = origin + make_vec3(X, Y, 0);
+        parameters.canopy_origin = plant_origin;
+        canopygenerator.sorghum( parameters, plant_origin ); // Gererate a single Sorhgum plant
     }
+
+
+
+    return 0;
 }
 
 int main(){
@@ -75,13 +109,15 @@ int main(){
     std::cout << obj_path << std::endl;
 
     // Read yaml file
-    load_yaml();
+    std::string yaml_path = path + "/python_scripts/data.yaml";
+    std::cout << yaml_path << std::endl;
+    YAML::Node config = load_yaml(yaml_path);
 
     // OBJ 3D Model
-    //make_field(context, obj_path);
+    make_field(context, obj_path, config);
 
     // Plant sorghum
-    //plant_sorghum(context);
+    plant_sorghum(context, config);
 
     // Set Visualizer
     Visualizer visualizer(800);
@@ -90,4 +126,6 @@ int main(){
     visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
 
     visualizer.plotInteractive();
+
+    return 0;
 }
