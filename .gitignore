@@ -38,3 +38,4 @@ DigitalSorghum/cmake-build-debug
 # IDE files
 .idea
 .vscode/settings.json
+cmake-build-debug

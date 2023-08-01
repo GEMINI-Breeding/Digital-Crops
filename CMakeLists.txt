@@ -8,14 +8,14 @@ project(helios)
 
 #-------- USER INPUTS ---------#
 
-find_package(yaml-cpp REQUIRED)
+#find_package(yaml-cpp REQUIRED)
 
 #provide the path to Helios base directory, either as an absolute path or a path relative to the location of this file
 set( BASE_DIRECTORY "libs/Helios" )
 
 # Add another cmake file in libs/yaml-cpp to the project
-add_subdirectory(libs/yaml-cpp/)
-
+add_subdirectory(libs/yaml-cpp)
+# include_directories(libs/yaml-cpp/include)
 
 #define the name of the executable to be created
 set( EXECUTABLE_NAME "DigitalSorghum" )
@@ -30,4 +30,4 @@ set( PLUGINS "visualizer;canopygenerator;" )
 #-------- DO NOT MODIFY ---------#
 include( "${BASE_DIRECTORY}/core/CMake_project.txt" )
 
-target_link_libraries(DigitalSorghum ${YAML_CPP_LIBRARIES})
+target_link_libraries(DigitalSorghum "yaml-cpp")
