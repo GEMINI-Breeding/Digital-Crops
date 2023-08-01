@@ -14,7 +14,7 @@ find_package(yaml-cpp REQUIRED)
 set( BASE_DIRECTORY "libs/Helios" )
 
 # Add another cmake file in libs/yaml-cpp to the project
-#add_subdirectory(libs/yaml-cpp/)
+add_subdirectory(libs/yaml-cpp/)
 
 
 #define the name of the executable to be created

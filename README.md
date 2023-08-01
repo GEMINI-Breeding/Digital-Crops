@@ -16,7 +16,7 @@ git submodule update --init --recursive
 # Build
 mkdir build
 cd build
-cmake ../DigitalSorghum
+cmake ../
 make -j
 
 # Run
