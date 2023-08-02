@@ -109,7 +109,7 @@ int main(){
     std::cout << obj_path << std::endl;
 
     // Read yaml file
-    std::string yaml_path = path + "/python_scripts/data.yaml";
+    std::string yaml_path = path + "/python_scripts/config.yaml";
     std::cout << yaml_path << std::endl;
     YAML::Node config = load_yaml(yaml_path);
 
