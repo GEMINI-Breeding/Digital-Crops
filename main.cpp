@@ -42,7 +42,6 @@ int make_field(Context &context, std::string obj_path, YAML::Node config){
     int n_rows = config["n_rows"].as<int>(); // 20
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
-
     for(int bed = 0;bed < n_beds;bed++){
         for(int row=0;row<n_rows;row++){
             float x = bed * BED_WIDTH;
@@ -82,11 +81,12 @@ int plant_sorghum(Context &context, YAML::Node config){
         // float z = 0;
         vec3 origin(-BED_WIDTH/2,-BED_LENGTH/2,0);
 
-        float X = config["crops"][i]["X"].as<float>() / 281 * 2 * BED_WIDTH;
-        float Y = config["crops"][i]["Y"].as<float>() / 376 * BED_LENGTH;
+        float X = (281-config["crops"][i]["x"].as<float>()) / 281 * 2 * BED_WIDTH;
+        float Y = config["crops"][i]["y"].as<float>() / 376 * BED_LENGTH;
         // float Z = config["crops"][i]["Z"].as<float>();
         vec3 plant_origin = origin + make_vec3(X, Y, 0);
         parameters.canopy_origin = plant_origin;
+        parameters.sorghum_stage = config["crops"][i]["growth_stage"].as<int>();
         canopygenerator.sorghum( parameters, plant_origin ); // Gererate a single Sorhgum plant
     }
 

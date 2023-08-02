@@ -10,105 +10,126 @@ crops:
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 41
-  Y: 97
+  x: 41
+  y: 97
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 41
-  Y: 135
+  x: 41
+  y: 135
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 39
-  Y: 208
+  x: 39
+  y: 208
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 38
-  Y: 248
+  x: 38
+  y: 248
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 32
-  Y: 297
+  x: 32
+  y: 297
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 106
-  Y: 66
+  x: 106
+  y: 66
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 105
-  Y: 98
+  x: 105
+  y: 98
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 110
-  Y: 147
+  x: 110
+  y: 147
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 105
-  Y: 190
+  x: 105
+  y: 190
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 111
-  Y: 220
+  x: 111
+  y: 220
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 106
-  Y: 253
+  x: 106
+  y: 253
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 0
   row: 0
-  X: 108
-  Y: 281
+  x: 108
+  y: 281
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 182
-  Y: 73
+  x: 182
+  y: 73
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 182
-  Y: 152
+  x: 182
+  y: 152
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 182
-  Y: 239
+  x: 182
+  y: 239
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 181
-  Y: 277
+  x: 181
+  y: 277
+  growth_stage: 3
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 246
-  Y: 90
+  x: 246
+  y: 90
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 250
-  Y: 137
+  x: 250
+  y: 137
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 244
-  Y: 207
+  x: 244
+  y: 207
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 245
-  Y: 277
+  x: 245
+  y: 277
+  growth_stage: 4
 - crop_type: Sorghum
   bed: 1
   row: 0
-  X: 243
-  Y: 239
+  x: 243
+  y: 239
+  growth_stage: 4

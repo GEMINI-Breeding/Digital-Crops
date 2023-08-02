@@ -38,8 +38,8 @@ if __name__ == '__main__':
                         'crop_type': 'Sorghum',
                         'bed': i,
                         'row': 0,
-                        'X': x,
-                        'Y': y,
+                        'x': x,
+                        'y': y,
                 }
                 data['crops'].append(dict)
                 print(points)
