@@ -1,7 +1,7 @@
 #include "Visualizer.h"
 #include "CanopyGenerator.h"
 #include "SyntheticAnnotation.h"
-
+#include "RadiationModel.h"
 #include "main.h"
 #include "yaml-cpp/yaml.h"
 
@@ -37,7 +37,8 @@ YAML::Node load_yaml(std::string yaml_path){
     return config;
 }
 
-vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
+//vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
+std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node config){
 
     int n_beds = config["n_beds"].as<int>(); //6
     int n_rows = config["n_rows"].as<int>(); // 20
@@ -46,6 +47,8 @@ vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
 
     // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
     vec3 center(0,0,0);
+    // Total UUIDs
+    std::vector<uint> UUIDs_total;
     for(int bed = 0;bed < n_beds;bed++){
         for(int row=0;row<n_rows;row++){
             float x = bed * BED_WIDTH;
@@ -57,13 +60,17 @@ vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
             center += origin;
             std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
             context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
+
+            // Append UUIDs_copy to UUIDs_total
+            UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
         }
     }
     center = center / (n_beds * n_rows);
-    return center;
+    //return center;
+    return UUIDs_total;
 }
 
-int plant_sorghum(CanopyGenerator &canopygenerator, YAML::Node config){
+std::vector<uint> plant_sorghum(Context &context, YAML::Node config){
     // Canopy generator model
     //CanopyGenerator canopygenerator(&context);
 
@@ -92,6 +99,7 @@ int plant_sorghum(CanopyGenerator &canopygenerator, YAML::Node config){
 #else
     // Plant Sorghum based on the config locations
     int n_crops = config["crops"].size();
+    std::vector<uint> UUIDs_total;
     for (int i = 0; i < config["crops"].size(); i++){
         int bed = config["crops"][i]["bed"].as<int>();
         int row = config["crops"][i]["row"].as<int>();
@@ -107,13 +115,12 @@ int plant_sorghum(CanopyGenerator &canopygenerator, YAML::Node config){
         vec3 plant_origin = origin + make_vec3(X, Y, 0);
         parameters.canopy_origin = plant_origin;
         parameters.sorghum_stage = config["crops"][i]["growth_stage"].as<int>();
-        //parameters.sorghum_stage = 5;
-        canopygenerator.sorghum( parameters, plant_origin ); // Gererate a single Sorhgum plant
+        uint plant_id = canopygenerator.sorghum( parameters, plant_origin ); // Gererate a single Sorhgum plant       
+        std::vector<uint> UUIDs_copy = canopygenerator.getAllUUIDs(plant_id);
+        UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
     }
 #endif
-
-
-    return 0;
+    return UUIDs_total;
 }
 
 int main(){
@@ -134,11 +141,36 @@ int main(){
     YAML::Node config = load_yaml(yaml_path);
 
     // OBJ 3D Model
-    vec3 field_origin = make_field(context, obj_path, config);
+    std::vector<uint> UUIDs_ground = make_field(context, obj_path, config);
 
     // Plant sorghum
-    CanopyGenerator canopygenerator(&context);
-    plant_sorghum(canopygenerator, config);
+    std::vector<uint> UUIDs_plant = plant_sorghum(context, config);
+
+    // Get all UUIDs
+    std::vector<uint> UUIDs_total;
+    for( uint UUID : UUIDs_total ){
+        std::vector<vec3> vertices = context.getPrimitiveVertices(UUID);
+        vec3 vertex = vertices.at(0);
+        float z = vertex.z;
+        context.setPrimitiveData(UUID,"height",z);
+    }
+
+
+    RadiationModel radiation(&context);
+    uint sourceID = radiation.addCollimatedRadiationSource(make_SphericalCoord(0.4* M_PI, 0.25 * M_PI));
+    radiation.addRadiationBand("SW");
+    radiation.disableEmission("SW");
+    radiation.setDiffuseRadiationFlux("SW", 0.f);
+    radiation.setSourceFlux(sourceID, "SW", 500);
+    radiation.setScatteringDepth("SW", 0); //you must set this >0 if you have nonzero reflectivity or transmissivity
+    radiation.addRadiationBand("LW");
+    radiation.setDiffuseRadiationFlux("LW", 350);
+    radiation.setScatteringDepth("LW", 0); //you must set this >0 if you have emissivity < 1
+    context.setPrimitiveData(UUIDs_plant, "temperature", 280.f);
+    context.setPrimitiveData(UUIDs_ground, "twosided_flag", uint(0));
+    radiation.updateGeometry();
+    radiation.runBand("SW");
+    //radiation.runBand("LW");
 
     // Set Visualizer
     Visualizer visualizer(800);
@@ -148,29 +180,9 @@ int main(){
     // Set the lighting model
     visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
 
-    std::vector<uint> UUIDs = context.getAllUUIDs();
-    for( uint UUID : UUIDs ){
-        std::vector<vec3> vertices = context.getPrimitiveVertices(UUID);
-        vec3 vertex = vertices.at(0);
-        float z = vertex.z;
-        context.setPrimitiveData(UUID,"height",z);
-    }
-
-
-    // Update the camera position.
-    // context.setGlobalData("camera_position", field_origin + make_vec3(0, 0, 10));
-    // context.setGlobalData("camera_lookat", field_origin);
-
-    visualizer.setCameraPosition(field_origin + make_vec3(0, 0, 5), field_origin);
-    
 #if 1
-    // Display height
-    visualizer.colorContextPrimitivesByData( "height" );
-    visualizer.setColormap( Visualizer::Ctable::COLORMAP_GRAY);
-    visualizer.setColorbarFontColor( RGB::gray );
-    visualizer.setColorbarTitle("height");
-#elif
-    
+    visualizer.setColorbarFontColor(RGB::gray);
+    visualizer.colorContextPrimitivesByData("radiation_flux_SW");
 #endif
 
     visualizer.plotInteractive();
