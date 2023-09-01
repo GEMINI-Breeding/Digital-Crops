@@ -24,7 +24,7 @@ set( EXECUTABLE_NAME "DigitalSorghum" )
 set( SOURCE_FILES "main.cpp" )
 
 #specify which plug-ins to use (separate plug-in names with semicolon)
-set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation")
+set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposition;energybalance")
 
 
 #-------- DO NOT MODIFY ---------#

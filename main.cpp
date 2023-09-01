@@ -2,6 +2,9 @@
 #include "CanopyGenerator.h"
 #include "SyntheticAnnotation.h"
 #include "RadiationModel.h"
+#include "SolarPosition.h"
+#include "EnergyBalanceModel.h"
+
 #include "main.h"
 #include "yaml-cpp/yaml.h"
 
@@ -70,7 +73,7 @@ std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node 
     return UUIDs_total;
 }
 
-std::vector<uint> plant_sorghum(Context &context, YAML::Node config){
+std::vector<uint> plant_sorghum(CanopyGenerator &canopygenerator, Context &context, YAML::Node config){
     // Canopy generator model
     //CanopyGenerator canopygenerator(&context);
 
@@ -144,8 +147,11 @@ int main(){
     std::vector<uint> UUIDs_ground = make_field(context, obj_path, config);
 
     // Plant sorghum
-    std::vector<uint> UUIDs_plant = plant_sorghum(context, config);
+    CanopyGenerator canopygenerator(&context);
+    std::vector<uint> UUIDs_leaves = plant_sorghum(canopygenerator, context, config);
 
+    std::vector<uint> UUIDs_all = context.getAllUUIDs();
+    
     // Get all UUIDs
     std::vector<uint> UUIDs_total;
     for( uint UUID : UUIDs_total ){
@@ -155,35 +161,132 @@ int main(){
         context.setPrimitiveData(UUID,"height",z);
     }
 
+    context.loadXML("../xml/timeseries_CIMIS_Davis.xml");
+    uint time = 12;
+    float air_temperature = context.queryTimeseriesData("air_temperature", time);
+    float air_humidity = context.queryTimeseriesData("humidity", time);
+    float wind_speed = context.queryTimeseriesData("wind_speed", time);
 
+    std::cout << "Ta = " << air_temperature << "; rh = " << air_humidity << "; U = " << wind_speed << std::endl;
+
+    context.setPrimitiveData(UUIDs_all, "air_temperature", air_temperature);
+    context.setPrimitiveData(UUIDs_all, "air_humidity", air_humidity);
+    context.setPrimitiveData(UUIDs_all, "wind_speed", wind_speed);
+
+    //** Set up Solar Position Model ** //
+    SolarPosition sun(7, 31.256, 119.947, &context );
+    float sky_LW = sun.getAmbientLongwaveFlux(air_temperature, air_humidity);
+    float sun_PAR = sun.getSolarFluxPAR( 101000,air_temperature, air_humidity, 0.05 );
+    float sun_NIR = sun.getSolarFluxNIR( 101000,air_temperature, air_humidity, 0.05 );
+    float f_diff = sun.getDiffuseFraction( 101000,air_temperature, air_humidity, 0.05 );
+
+    //*** Set up Radiation Model ***//
     RadiationModel radiation(&context);
-    uint sourceID = radiation.addCollimatedRadiationSource(make_SphericalCoord(0.4* M_PI, 0.25 * M_PI));
-    radiation.addRadiationBand("SW");
-    radiation.disableEmission("SW");
-    radiation.setDiffuseRadiationFlux("SW", 0.f);
-    radiation.setSourceFlux(sourceID, "SW", 500);
-    radiation.setScatteringDepth("SW", 0); //you must set this >0 if you have nonzero reflectivity or transmissivity
-    radiation.addRadiationBand("LW");
-    radiation.setDiffuseRadiationFlux("LW", 350);
-    radiation.setScatteringDepth("LW", 0); //you must set this >0 if you have emissivity < 1
-    context.setPrimitiveData(UUIDs_plant, "temperature", 280.f);
-    context.setPrimitiveData(UUIDs_ground, "twosided_flag", uint(0));
-    radiation.updateGeometry();
-    radiation.runBand("SW");
-    //radiation.runBand("LW");
 
-    // Set Visualizer
+    uint sourceID = radiation.addSunSphereRadiationSource( sun.getSunDirectionVector() ); //this will set to the default sun direction of vertical
+
+    radiation.addRadiationBand("PAR");
+    radiation.disableEmission("PAR");
+    radiation.setSourceFlux(sourceID, "PAR", sun_PAR*(1.f-f_diff));
+    radiation.setDiffuseRadiationFlux("PAR", sun_PAR*f_diff);
+    radiation.setScatteringDepth( "PAR", 3);
+
+    radiation.addRadiationBand("NIR");
+    radiation.disableEmission("NIR");
+    radiation.setSourceFlux(sourceID, "NIR", sun_NIR*(1.f-f_diff));
+    radiation.setDiffuseRadiationFlux("NIR", sun_NIR*f_diff);
+    radiation.setScatteringDepth( "NIR", 3);
+
+    radiation.addRadiationBand("LW");
+    radiation.setDiffuseRadiationFlux("LW", sky_LW);
+
+    radiation.enforcePeriodicBoundary("xy");
+
+    //set leaf radiative properties
+    context.setPrimitiveData( UUIDs_leaves, "reflectivity_PAR", 0.05f );
+    context.setPrimitiveData( UUIDs_leaves, "transmissivity_PAR", 0.05f );
+    context.setPrimitiveData( UUIDs_leaves, "reflectivity_NIR", 0.4f );
+    context.setPrimitiveData( UUIDs_leaves, "transmissivity_NIR", 0.4f );
+
+    context.setPrimitiveData( UUIDs_ground, "reflectivity_PAR", 0.15f );
+    context.setPrimitiveData( UUIDs_ground, "reflectivity_NIR", 0.35f );
+
+    context.setPrimitiveData(UUIDs_ground, "twosided_flag",uint(0)); //only want ground to intercept radiation from the top
+
+    radiation.updateGeometry();//geometry will not change throughout the day, so only update it once
+
+    //*** Set Up Energy Balance Model ***//
+
+    EnergyBalanceModel energybalance(&context);
+
+    energybalance.addRadiationBand("PAR");
+    energybalance.addRadiationBand("NIR");
+    energybalance.addRadiationBand("LW");
+
+    //*** Set Moisture Conductance ***//
+
+    //for now, let's just assume we have constant stomatal conductance for the leaves and the ground is dry
+    context.setPrimitiveData(UUIDs_leaves,"moisture_conductance",0.2f);
+
+    //*** Run the Models ***//
+
+    radiation.runBand( "PAR" );
+    radiation.runBand( "NIR" );
+    radiation.runBand("LW"); //note that we have not run the energy balance yet, so this is based on default temperatures
+
+    energybalance.run();//note that this is based on longwave that was based on default temperatures, so it's not quite right yet
+
+    //run these again to iteratively update. You could continue iterating depending on how accurate you want to be
+    radiation.runBand("LW");
+    energybalance.run();
+
+    //*** Get the Temperature Distribution and Calculate the Crop Coefficient ***//
+
+    float latent_flux = 0;
+    //float ground_area = params.canopy_extent.x*params.canopy_extent.y;
+    float ground_area = BED_HEIGHT*BED_WIDTH * config["n_beds"].as<int>()*config["n_rows"].as<int>();
+    for( uint UUID : UUIDs_all ) {
+        float E;
+        context.getPrimitiveData(UUID, "latent_flux", E);
+        float area = context.getPrimitiveArea(UUID);
+        latent_flux += E * area / ground_area;
+    }
+
+    float ET = latent_flux; //W/m^2 = J/s/m^2
+    ET = ET / 2264705.f * 3600; //mm H2O
+
+    std::cout << "ET = " << ET << " mm" << std::endl;
+
+    float ET0 = context.queryTimeseriesData("ET0", time);
+    std::cout << "CIMIS ET0 = " << ET0 << " mm" << std::endl;
+
+    std::cout << "kc = " << ET / ET0 << std::endl;
+
+    context.writePrimitiveData( "temperature.txt", {"temperature"}, UUIDs_leaves, true);
+
+    //Add some calculated primitive data called "dT" so we can visualize based on it
+    for( uint UUID : UUIDs_all ) {
+        float T;
+        context.getPrimitiveData( UUID, "temperature", T);
+        context.setPrimitiveData( UUID, "temperature_C", T-273.15);
+        context.setPrimitiveData( UUID, "dT", T-air_temperature);
+    }
+
     Visualizer visualizer(800);
     visualizer.hideWatermark();
-    
-    visualizer.buildContextGeometry(&context);
-    // Set the lighting model
-    visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
 
-#if 1
-    visualizer.setColorbarFontColor(RGB::gray);
-    visualizer.colorContextPrimitivesByData("radiation_flux_SW");
+    visualizer.buildContextGeometry(&context);
+
+    visualizer.setCameraPosition(make_vec3(0, 0, 5), make_vec3(0, 0, 0));
+
+#if 0
+    visualizer.colorContextPrimitivesByData( "dT" );
+    visualizer.setColorbarTitle("T-T_a_i_r");
+#else
+    visualizer.colorContextPrimitivesByData( "temperature_C" );
+    visualizer.setColorbarTitle("Temperature (C)");
 #endif
+    visualizer.setColorbarFontSize(18);
 
     visualizer.plotInteractive();
 
