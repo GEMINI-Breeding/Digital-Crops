@@ -1,5 +1,6 @@
 #include "Visualizer.h"
 #include "CanopyGenerator.h"
+#include "SyntheticAnnotation.h"
 
 #include "main.h"
 #include "yaml-cpp/yaml.h"
@@ -32,44 +33,63 @@ YAML::Node load_yaml(std::string yaml_path){
 
     }
 
-    
+
     return config;
 }
 
-int make_field(Context &context, std::string obj_path, YAML::Node config){
+vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
 
     int n_beds = config["n_beds"].as<int>(); //6
     int n_rows = config["n_rows"].as<int>(); // 20
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
+
+    // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
+    vec3 center(0,0,0);
     for(int bed = 0;bed < n_beds;bed++){
         for(int row=0;row<n_rows;row++){
             float x = bed * BED_WIDTH;
             float y = row * BED_LENGTH;
             float z = 0;
+
+            // Make a vector of x y z origin
+            vec3 origin(x,y,z);
+            center += origin;
             std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
             context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
         }
     }
+    center = center / (n_beds * n_rows);
+    return center;
 }
 
-int plant_sorghum(Context &context, YAML::Node config){
+int plant_sorghum(CanopyGenerator &canopygenerator, YAML::Node config){
     // Canopy generator model
-    CanopyGenerator canopygenerator(&context);
+    //CanopyGenerator canopygenerator(&context);
 
     //Declare the parameter set for VSP grapevine
     SorghumCanopyParameters parameters;
+#if 0
+    //Set the parameters
     parameters.plant_count = make_int2(2,8);
-
-
-    //Variable defining the location of the plant
-//    vec3 origin(0,0,0);
-    //Add the sorghum geometry to the Context
-//    canopygenerator.sorghum( parameters, origin );
-
-    int n_beds = 2; //6
-    int n_rows = 2; // 20
-
+    int n_beds = config["n_beds"].as<int>(); //6
+    int n_rows = config["n_rows"].as<int>();// 20
+    for (int i = 0;i < n_beds;++i){
+        for (int j = 0;j < n_rows;++j){
+            #if 0
+            //Variable defining the location of the plant
+            vec3 origin(i * BED_WIDTH, j * BED_LENGTH, 0);
+            //Add the sorghum geometry to the Context
+            canopygenerator.sorghum(parameters, origin );
+            #else
+            //Variable defining the location of the plant
+            parameters.canopy_origin = make_vec3(i * BED_WIDTH, j * BED_LENGTH, 0);
+            //Add the sorghum geometry to the Context
+            canopygenerator.buildCanopy(parameters);
+            #endif
+        }
+    }
+#else
     // Plant Sorghum based on the config locations
     int n_crops = config["crops"].size();
     for (int i = 0; i < config["crops"].size(); i++){
@@ -87,9 +107,10 @@ int plant_sorghum(Context &context, YAML::Node config){
         vec3 plant_origin = origin + make_vec3(X, Y, 0);
         parameters.canopy_origin = plant_origin;
         parameters.sorghum_stage = config["crops"][i]["growth_stage"].as<int>();
+        //parameters.sorghum_stage = 5;
         canopygenerator.sorghum( parameters, plant_origin ); // Gererate a single Sorhgum plant
     }
-
+#endif
 
 
     return 0;
@@ -97,7 +118,6 @@ int plant_sorghum(Context &context, YAML::Node config){
 
 int main(){
     Context context;
-
 
     // Get the path of main.cpp
     std::string path = __FILE__;
@@ -114,18 +134,95 @@ int main(){
     YAML::Node config = load_yaml(yaml_path);
 
     // OBJ 3D Model
-    make_field(context, obj_path, config);
+    vec3 field_origin = make_field(context, obj_path, config);
 
     // Plant sorghum
-    plant_sorghum(context, config);
+    CanopyGenerator canopygenerator(&context);
+    plant_sorghum(canopygenerator, config);
 
     // Set Visualizer
     Visualizer visualizer(800);
+    visualizer.hideWatermark();
+    
     visualizer.buildContextGeometry(&context);
     // Set the lighting model
     visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
 
+    std::vector<uint> UUIDs = context.getAllUUIDs();
+    for( uint UUID : UUIDs ){
+        std::vector<vec3> vertices = context.getPrimitiveVertices(UUID);
+        vec3 vertex = vertices.at(0);
+        float z = vertex.z;
+        context.setPrimitiveData(UUID,"height",z);
+    }
+
+
+    // Update the camera position.
+    // context.setGlobalData("camera_position", field_origin + make_vec3(0, 0, 10));
+    // context.setGlobalData("camera_lookat", field_origin);
+
+    visualizer.setCameraPosition(field_origin + make_vec3(0, 0, 5), field_origin);
+    
+#if 1
+    // Display height
+    visualizer.colorContextPrimitivesByData( "height" );
+    visualizer.setColormap( Visualizer::Ctable::COLORMAP_GRAY);
+    visualizer.setColorbarFontColor( RGB::gray );
+    visualizer.setColorbarTitle("height");
+#elif
+    
+#endif
+
     visualizer.plotInteractive();
+
+    // Save the image to the file.
+    std::string this_view_path =  std::string("rendered_images");
+    std::system(("mkdir -p " + this_view_path).c_str());
+    std::string image_view_path = this_view_path + "/" "RGB_rendering.jpeg";
+    visualizer.printWindow(image_view_path.c_str());
+
+  
+#if 0
+    // Generate annotations
+    // Declare the Synthetic Annotation class.
+    SyntheticAnnotation annotation(&context);
+    //annotation.setCameraPosition(field_origin + make_vec3(0, 0, 10), field_origin);
+    //annotation.setCameraPosition(make_vec3(0, 0, 1), make_vec3(1, 0, 1));
+    annotation.setCameraPosition(make_vec3(0, 0, 5), make_vec3(1, 0, 0)); // 왜 이렇게 해야하는지 잘 모르겠음
+    annotation.disableInstanceSegmentation();
+    //annotation.setWindowSize(800, 800);
+
+    // Add labels according to whatever scheme we want.
+    for (int p = 0; p < canopygenerator.getPlantCount(); p++)
+    {   
+        // loop over plants
+        //if (!config.simulation_type.empty() && config.simulation_type[0] == "rgb")
+        {
+            annotation.labelPrimitives(canopygenerator.getTrunkUUIDs(p), "trunks");
+            annotation.labelPrimitives(canopygenerator.getBranchUUIDs(p), "branches");
+            annotation.labelPrimitives(canopygenerator.getLeafUUIDs(p), "leaves");
+            std::vector<std::vector<std::vector<uint>>> fruitUUIDs = canopygenerator.getFruitUUIDs(p);
+            if (fruitUUIDs.size() == 1)
+            { // no clusters, only individual fruit
+                for (auto &fruit : fruitUUIDs.front())
+                    annotation.labelPrimitives(fruit, "clusters");
+            }
+            else if (fruitUUIDs.size() > 1)
+            { // fruit contained within cluster - label by cluster
+                for (auto &cluster : fruitUUIDs)
+                    annotation.labelPrimitives(flatten(cluster), "clusters");
+            }
+        }
+    }
+    // Render the annotations.
+    std::string this_image_dir =  std::string("rendered_images/annotations");
+    std::cout << this_image_dir;
+    annotation.render(this_image_dir.c_str());
+#endif
+
+
+
+
 
     return 0;
 }
