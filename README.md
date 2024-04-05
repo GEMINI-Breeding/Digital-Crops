@@ -14,8 +14,8 @@ Real to Syn and Syn to Real for GEMINI Sorghum using HELIOS
 # Install
 ```bash
 # Checkout the code
-git clone git@github.com:GEMINI-Breeding/Digital-Sorghum.git
-cd Digital-Sorghum
+git clone git@github.com:GEMINI-Breeding/Digital-Crops.git
+cd Digital-Crops
 # Init submodules
 git submodule update --init --recursive
 
@@ -26,6 +26,6 @@ cmake ../
 make -j
 
 # Run
-./DigitalSorghum
+./DigitalCrops
 
 ```
