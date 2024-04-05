@@ -1,4 +1,10 @@
-# Digital-Sorghum
+# Digital Crops
+Creating Helios model from drone or rover data
+
+## Digital-Cowpea
+TBD
+
+## Digital-Sorghum
 Real to Syn and Syn to Real for GEMINI Sorghum using HELIOS
 <!-- Add Preview.png -->
 ![Preview](Preview.png)
