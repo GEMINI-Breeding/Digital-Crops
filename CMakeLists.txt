@@ -24,7 +24,8 @@ set( EXECUTABLE_NAME "DigitalCrops" )
 set( SOURCE_FILES "main.cpp" )
 
 #specify which plug-ins to use (separate plug-in names with semicolon)
-set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposition;energybalance")
+#set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposition;energybalance")
+set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition")
 
 
 #-------- DO NOT MODIFY ---------#

@@ -1,9 +1,9 @@
 #include "Visualizer.h"
 #include "CanopyGenerator.h"
 #include "SyntheticAnnotation.h"
-#include "RadiationModel.h"
+//#include "RadiationModel.h"
 #include "SolarPosition.h"
-#include "EnergyBalanceModel.h"
+//#include "EnergyBalanceModel.h"
 
 #include "main.h"
 #include "yaml-cpp/yaml.h"
@@ -61,7 +61,7 @@ std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node 
             vec3 origin(x,y,z);
             center += origin;
             std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
-            context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
+            //context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
 
             // Append UUIDs_copy to UUIDs_total
             UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
@@ -129,12 +129,14 @@ std::vector<uint> plant_sorghum(CanopyGenerator &canopygenerator, Context &conte
 std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context, YAML::Node config){
     // Canopy generator model
     //CanopyGenerator canopygenerator(&context);
-
-
     // Plant Sorghum based on the config locations
     int n_crops = config["crops"].size();
     std::vector<uint> UUIDs_total;
     uint plant_id = 0;
+    // Set random seed
+    canopygenerator.seedRandomGenerator(100);
+
+
     for (int i = 0; i < config["crops"].size(); i++){
         int bed = config["crops"][i]["bed"].as<int>();
         int row = config["crops"][i]["row"].as<int>();
@@ -202,7 +204,7 @@ int main(){
     visualizer.hideWatermark();
     visualizer.buildContextGeometry(&context);
     visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-    visualizer.setCameraPosition(make_vec3(0, 0, 5.01), make_vec3(0, 0, 0));
+    visualizer.setCameraPosition(make_vec3(0, 0, 5.0), make_vec3(0, 0, 0));
 
     if(1){
         visualizer.plotInteractive();
