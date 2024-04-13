@@ -1,0 +1,79 @@
+location: Davis
+year: 2023
+crop_types:
+- Cowpea
+- Common Beans
+- Sorghum
+n_beds: 1
+n_rows: 1
+crops:
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: -0.352714
+  y: 0.698199
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 86
+  height: 77
+  crop_height: 0.04
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: -0.332476
+  y: 0.449565
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 101
+  height: 63
+  crop_height: 0.06
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: -0.338258
+  y: -0.602793
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 74
+  height: 62
+  crop_height: 0.047
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: -0.338258
+  y: -1.12319
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 70
+  height: 85
+  crop_height: 0.043
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: 0.326694
+  y: 0.955507
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 59
+  height: 46
+  crop_height: 0.027
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: 0.306456
+  y: 0.611467
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 50
+  height: 79
+  crop_height: 0.033
+- crop_type: Cowpea
+  bed: 15
+  row: 10
+  x: -0.323803
+  y: -0.226951
+  plot_center_x: 606137.929804
+  plot_center_y: 4265693.282604
+  width: 73
+  height: 114
+  crop_height: 0.038

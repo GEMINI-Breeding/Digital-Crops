@@ -47,6 +47,7 @@ std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node 
     int n_rows = config["n_rows"].as<int>(); 
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
+
     // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
     vec3 center(0,0,0);
     // Total UUIDs
@@ -138,14 +139,18 @@ std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context
     for (int i = 0; i < config["crops"].size(); i++){
         int bed = config["crops"][i]["bed"].as<int>();
         int row = config["crops"][i]["row"].as<int>();
-        vec3 origin(0, 0, 0);
-        float X = config["crops"][i]["x"].as<float>();
-        float Y = config["crops"][i]["y"].as<float>();
+        // float x = bed * BED_WIDTH;
+        // float y = row * BED_LENGTH;
+        // float z = 0;
+        vec3 origin(-BED_WIDTH / 2, -BED_LENGTH / 2, 0);
+
+        float X = (281 - config["crops"][i]["x"].as<float>()) / 281 * 2 * BED_WIDTH;
+        float Y = config["crops"][i]["y"].as<float>() / 376 * BED_LENGTH;
         // float Z = config["crops"][i]["Z"].as<float>();
         vec3 plant_origin = origin + make_vec3(X, Y, 0);
 
         //printf(config["crops"][i]["crop_type"].as<std::string>().c_str());
-        // std::cout << config["crops"][i]["crop_type"] << std::endl;
+        std::cout << config["crops"][i]["crop_type"] << std::endl;
         if (config["crops"][i]["crop_type"].as<std::string>() == "Sorghum"){
             SorghumCanopyParameters parameters;
             parameters.canopy_origin = plant_origin;
@@ -158,7 +163,6 @@ std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context
             parameters.canopy_origin = plant_origin;
             plant_id = canopygenerator.bean(parameters, plant_origin); // Gererate a single Sorhgum plant
         }else{
-
             std::cout << "Crop type not supported" << std::endl;
             continue;
         }
@@ -185,7 +189,7 @@ int main(){
 
     // Read yaml file
     //std::string yaml_path = path + "/python_scripts/config.yaml";
-    std::string yaml_path = path + "/data/2023-06-20-P4-RGB_Plot_276.yaml";
+    std::string yaml_path = path + "/data/2023-06-20-P4-RGB_Plot_428.yaml";
     std::cout << yaml_path << std::endl;
     YAML::Node config = load_yaml(yaml_path);
 
@@ -194,28 +198,155 @@ int main(){
 
     // Plant sorghum
     CanopyGenerator canopygenerator(&context);
-
+#if 0
+    std::vector<uint> UUIDs_leaves = plant_sorghum(canopygenerator, context, config);
+#else
     std::vector<uint> UUIDs_leaves = plant_crops(canopygenerator, context, config);
+#endif
     std::vector<uint> UUIDs_all = context.getAllUUIDs();
-
-    Visualizer visualizer(1920);
-    visualizer.hideWatermark();
-    visualizer.buildContextGeometry(&context);
-    visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-    visualizer.setCameraPosition(make_vec3(0, 0, 5.01), make_vec3(0, 0, 0));
-
-    if(1){
-        visualizer.plotInteractive();
-    }else{
-        visualizer.plotUpdate();
+    
+    // Get all UUIDs
+    std::vector<uint> UUIDs_total;
+    for( uint UUID : UUIDs_total ){
+        std::vector<vec3> vertices = context.getPrimitiveVertices(UUID);
+        vec3 vertex = vertices.at(0);
+        float z = vertex.z;
+        context.setPrimitiveData(UUID,"height",z);
     }
 
+    context.loadXML("../xml/timeseries_CIMIS_Davis.xml");
+    uint time = 12;
+    float air_temperature = context.queryTimeseriesData("air_temperature", time);
+    float air_humidity = context.queryTimeseriesData("humidity", time);
+    float wind_speed = context.queryTimeseriesData("wind_speed", time);
+
+    std::cout << "Ta = " << air_temperature << "; rh = " << air_humidity << "; U = " << wind_speed << std::endl;
+
+    context.setPrimitiveData(UUIDs_all, "air_temperature", air_temperature);
+    context.setPrimitiveData(UUIDs_all, "air_humidity", air_humidity);
+    context.setPrimitiveData(UUIDs_all, "wind_speed", wind_speed);
+
+    //** Set up Solar Position Model ** //
+    SolarPosition sun(7, 31.256, 119.947, &context );
+    float sky_LW = sun.getAmbientLongwaveFlux(air_temperature, air_humidity);
+    float sun_PAR = sun.getSolarFluxPAR( 101000,air_temperature, air_humidity, 0.05 );
+    float sun_NIR = sun.getSolarFluxNIR( 101000,air_temperature, air_humidity, 0.05 );
+    float f_diff = sun.getDiffuseFraction( 101000,air_temperature, air_humidity, 0.05 );
+
+    //*** Set up Radiation Model ***//
+    RadiationModel radiation(&context);
+
+    uint sourceID = radiation.addSunSphereRadiationSource( sun.getSunDirectionVector() ); //this will set to the default sun direction of vertical
+
+    radiation.addRadiationBand("PAR");
+    radiation.disableEmission("PAR");
+    radiation.setSourceFlux(sourceID, "PAR", sun_PAR*(1.f-f_diff));
+    radiation.setDiffuseRadiationFlux("PAR", sun_PAR*f_diff);
+    radiation.setScatteringDepth( "PAR", 3);
+
+    radiation.addRadiationBand("NIR");
+    radiation.disableEmission("NIR");
+    radiation.setSourceFlux(sourceID, "NIR", sun_NIR*(1.f-f_diff));
+    radiation.setDiffuseRadiationFlux("NIR", sun_NIR*f_diff);
+    radiation.setScatteringDepth( "NIR", 3);
+
+    radiation.addRadiationBand("LW");
+    radiation.setDiffuseRadiationFlux("LW", sky_LW);
+
+    radiation.enforcePeriodicBoundary("xy");
+
+    //set leaf radiative properties
+    context.setPrimitiveData( UUIDs_leaves, "reflectivity_PAR", 0.05f );
+    context.setPrimitiveData( UUIDs_leaves, "transmissivity_PAR", 0.05f );
+    context.setPrimitiveData( UUIDs_leaves, "reflectivity_NIR", 0.4f );
+    context.setPrimitiveData( UUIDs_leaves, "transmissivity_NIR", 0.4f );
+
+    context.setPrimitiveData( UUIDs_ground, "reflectivity_PAR", 0.15f );
+    context.setPrimitiveData( UUIDs_ground, "reflectivity_NIR", 0.35f );
+
+    context.setPrimitiveData(UUIDs_ground, "twosided_flag",uint(0)); //only want ground to intercept radiation from the top
+
+    radiation.updateGeometry();//geometry will not change throughout the day, so only update it once
+
+    //*** Set Up Energy Balance Model ***//
+
+    EnergyBalanceModel energybalance(&context);
+
+    energybalance.addRadiationBand("PAR");
+    energybalance.addRadiationBand("NIR");
+    energybalance.addRadiationBand("LW");
+
+    //*** Set Moisture Conductance ***//
+
+    //for now, let's just assume we have constant stomatal conductance for the leaves and the ground is dry
+    context.setPrimitiveData(UUIDs_leaves,"moisture_conductance",0.2f);
+
+    //*** Run the Models ***//
+
+    radiation.runBand( "PAR" );
+    radiation.runBand( "NIR" );
+    radiation.runBand("LW"); //note that we have not run the energy balance yet, so this is based on default temperatures
+
+    energybalance.run();//note that this is based on longwave that was based on default temperatures, so it's not quite right yet
+
+    //run these again to iteratively update. You could continue iterating depending on how accurate you want to be
+    radiation.runBand("LW");
+    energybalance.run();
+
+    //*** Get the Temperature Distribution and Calculate the Crop Coefficient ***//
+
+    float latent_flux = 0;
+    //float ground_area = params.canopy_extent.x*params.canopy_extent.y;
+    float ground_area = BED_HEIGHT*BED_WIDTH * config["n_beds"].as<int>()*config["n_rows"].as<int>();
+    for( uint UUID : UUIDs_all ) {
+        float E;
+        context.getPrimitiveData(UUID, "latent_flux", E);
+        float area = context.getPrimitiveArea(UUID);
+        latent_flux += E * area / ground_area;
+    }
+
+    float ET = latent_flux; //W/m^2 = J/s/m^2
+    ET = ET / 2264705.f * 3600; //mm H2O
+
+    std::cout << "ET = " << ET << " mm" << std::endl;
+
+    float ET0 = context.queryTimeseriesData("ET0", time);
+    std::cout << "CIMIS ET0 = " << ET0 << " mm" << std::endl;
+
+    std::cout << "kc = " << ET / ET0 << std::endl;
+
+    context.writePrimitiveData( "temperature.txt", {"temperature"}, UUIDs_leaves, true);
+
+    //Add some calculated primitive data called "dT" so we can visualize based on it
+    for( uint UUID : UUIDs_all ) {
+        float T;
+        context.getPrimitiveData( UUID, "temperature", T);
+        context.setPrimitiveData( UUID, "temperature_C", T-273.15);
+        context.setPrimitiveData( UUID, "dT", T-air_temperature);
+    }
+
+    Visualizer visualizer(800);
+    visualizer.hideWatermark();
+
+    visualizer.buildContextGeometry(&context);
+
+    visualizer.setCameraPosition(make_vec3(0, 0, 5), make_vec3(0, 0, 0));
+
+#if 0
+    visualizer.colorContextPrimitivesByData( "dT" );
+    visualizer.setColorbarTitle("T-T_a_i_r");
+#else
+    visualizer.colorContextPrimitivesByData( "temperature_C" );
+    visualizer.setColorbarTitle("Temperature (C)");
+#endif
+    visualizer.setColorbarFontSize(18);
+
+    visualizer.plotInteractive();
+
     // Save the image to the file.
-    std::string this_view_path =  std::string("../data");
+    std::string this_view_path =  std::string("rendered_images");
     std::system(("mkdir -p " + this_view_path).c_str());
-    // Generate the image name from yaml_path
-    std::string image_view_path = this_view_path + "/" + yaml_path.substr(yaml_path.find_last_of("/")+1) + ".jpg";
-    // std::string image_view_path = this_view_path + "/" "RGB_rendering.jpeg";
+    std::string image_view_path = this_view_path + "/" "RGB_rendering.jpeg";
     visualizer.printWindow(image_view_path.c_str());
 
   

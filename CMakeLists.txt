@@ -18,7 +18,7 @@ add_subdirectory(libs/yaml-cpp)
 # include_directories(libs/yaml-cpp/include)
 
 #define the name of the executable to be created
-set( EXECUTABLE_NAME "DigitalSorghum" )
+set( EXECUTABLE_NAME "DigitalCrops" )
 
 #provide name of source file(s) (separate multiple file names with semicolon)
 set( SOURCE_FILES "main.cpp" )
@@ -30,4 +30,4 @@ set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposi
 #-------- DO NOT MODIFY ---------#
 include( "${BASE_DIRECTORY}/core/CMake_project.txt" )
 
-target_link_libraries(DigitalSorghum "yaml-cpp")
+target_link_libraries(DigitalCrops "yaml-cpp")
