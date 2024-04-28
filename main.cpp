@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "Visualizer.h"
 #include "CanopyGenerator.h"
 #include "SyntheticAnnotation.h"
@@ -45,6 +46,41 @@ std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node 
 
     int n_beds = config["n_beds"].as<int>(); 
     int n_rows = config["n_rows"].as<int>(); 
+
+    // Manipulate mtl file before loading OBJ file
+    std::string orig_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl.orig";
+
+    // Replace numbers with soil color in the config
+    float soil_color[3];
+    if (config["soil_color"])
+    {   int cnt = 0;
+        for (YAML::const_iterator it = config["soil_color"].begin(); it != config["soil_color"].end(); ++it)
+        {
+            // Push to the array
+            soil_color[cnt] = it->as<float>();
+            cnt++;
+        }
+        
+        // Rewrite the mtl file
+        // Remove the mtl file if it exists
+        std::string new_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl";
+        std::remove(new_mtl_path.c_str());
+        
+        std::ofstream file(new_mtl_path);
+        file << "# Blender MTL File: 'None'\n";
+        file << "# Material Count: 1\n\n";
+        file << "newmtl None\n";
+        file << "Ns 500.000001\n";
+        file << "Ka " << soil_color[0] << " " << soil_color[1] << " " << soil_color[2] << "\n";
+        file << "Kd " << soil_color[0]*0.8 << " " << soil_color[1]*0.8 << " " << soil_color[2]*0.8 << "\n";
+        file << "Ks " << soil_color[0]*0.8 << " " << soil_color[1]*0.8 << " " << soil_color[2]*0.8 << "\n";
+        file << "Ke 0.000000 0.000000 0.000000\n";
+        file << "Ni 1.450000\n";
+        file << "d 1.000000\n";
+        file << "illum 2\n";
+
+        file.close();
+    }
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
     // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
@@ -158,6 +194,19 @@ std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context
         }else if (config["crops"][i]["crop_type"].as<std::string>() == "Cowpea"){
             BeanParameters parameters;
             parameters.canopy_origin = plant_origin;
+            // Read crop color from the config
+            float crop_color[3];
+            if(config["crops"][i]["plant_color"]){
+                int cnt = 0;
+                for (YAML::const_iterator it = config["crops"][i]["plant_color"].begin(); it != config["crops"][i]["plant_color"].end(); ++it)
+                {
+                    // Push to the array
+                    crop_color[cnt] = it->as<float>();
+                    cnt++;
+                }
+               parameters.shoot_color = make_RGBcolor(crop_color[0], crop_color[1], crop_color[2]);
+               //parameters.shoot_color = make_RGBcolor(1,0,0);
+            }
             plant_id = canopygenerator.bean(parameters, plant_origin); // Gererate a single Sorhgum plant
         }else{
 
@@ -204,13 +253,14 @@ int main(){
     visualizer.hideWatermark();
     visualizer.buildContextGeometry(&context);
     visualizer.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-    visualizer.setCameraPosition(make_vec3(0, 0, 5.0), make_vec3(0, 0, 0));
+    visualizer.setCameraPosition(SphericalCoord(5, 0.5*float(M_PI), 0), make_vec3(0, 0, 0));
 
-    if(1){
-        visualizer.plotInteractive();
-    }else{
-        visualizer.plotUpdate();
-    }
+#if 1
+    visualizer.plotInteractive();
+#else
+    visualizer.plotUpdate( true );
+    wait(5);
+#endif
 
     // Save the image to the file.
     std::string this_view_path =  std::string("../data");

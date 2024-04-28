@@ -84,21 +84,33 @@ def get_drone_image(dataset, plot_boundary, transform_WGS84_to_UTM,row=None, col
     else:
         return None, None
 
-def calc_crop_height_from_dsm(dsm, rgb, points, debug=False):
+def calc_crop_traits(dsm, rgb, mask, points, debug=False):
     # Resize dsm to match with the RGB image
     dsm_resized = cv2.resize(dsm, (rgb.shape[1], rgb.shape[0]))
-    # Get the height of the crop
-    crop_height = np.mean(dsm_resized[points[0][1]:points[1][1], points[0][0]:points[1][0]])
+    # Get the height of the crop from the DSM with mask
+    # Create a union mask from the points and the mask
+    point_mask = np.zeros_like(mask)
+    cv2.rectangle(point_mask, (points[0][0], points[0][1]), (points[1][0], points[1][1]), 1, -1)
+    crop_mask = cv2.bitwise_and(point_mask, mask)
+    # Get the crop height
+    crop_height = np.mean(dsm_resized[crop_mask == 1])
     crop_height = float(crop_height)
+
+    # Get Color
+    crop_color = np.round(np.mean(rgb[crop_mask == 1], axis=0) / 255, 2)
+    # BGR to RGB
+    crop_color = crop_color[[2,1,0]]
+
     if debug:
         # Draw rect on DEM Image
         dsm_resized_disp = cv2.normalize(dsm_resized, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         dsm_resized_disp = cv2.applyColorMap(dsm_resized_disp, cv2.COLORMAP_JET)
         cv2.rectangle(dsm_resized_disp, (points[0][0], points[0][1]), (points[1][0], points[1][1]), (0, 255, 0), 2)
         cv2.imshow('DSM', dsm_resized_disp)
+        cv2.imshow('Crop Mask', crop_mask*255)
         cv2.waitKey(0)
     
-    return crop_height
+    return crop_height, crop_color
 
 def json_img_data_to_image(json_data, debug=False):
     # Get the image data
@@ -156,8 +168,6 @@ if __name__ == '__main__':
         'crop_types': ['Cowpea', 'Common Beans', 'Sorghum','Weed'],
         'n_beds': 1,
         'n_rows': 1,
-        'crops': [
-        ]
     }
 
     # Read orthophoto
@@ -193,17 +203,21 @@ if __name__ == '__main__':
     pixel_values_dem, _ = get_drone_image(dataset_dem, geojson_gdf, transform_WGS84_to_UTM, plot_id=plot_id)
 
 
-    # Calculate base height
-    base_height = calc_base_height(pixel_values, pixel_values_dem, debug=False)
-
-
     # Load image using opencv
     img = pixel_values
 
     # ExG image
     ExG = calcExG(img)
     # Normalize image to 0-255
-    ExG = cv2.normalize(ExG, None, 0, 255, cv2.NORM_MINMAX)
+    ExG = cv2.normalize(ExG, None, 0, 255, cv2.NORM_MINMAX,dtype=cv2.CV_8UC1)
+    # Threshold the ExG image
+    _, ExG_mask = cv2.threshold(ExG, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Calculate soil color
+    soil_color = np.round(np.mean(img[ExG_mask == 0], axis=0) / 255, 2)
+    # BGR to RGB
+    soil_color = soil_color[[2,1,0]]
+    data['soil_color'] = soil_color.tolist()
     
     # Resize the image
     img_disp = cv2.resize(img, (0, 0), fx=debug_scale, fy=debug_scale)
@@ -241,6 +255,10 @@ if __name__ == '__main__':
     shapes = pd.DataFrame(pd.DataFrame(json_data["shapes"]))
     img = json_img_data_to_image(json_data)
 
+    # Calculate base height
+    base_height = calc_base_height(pixel_values, pixel_values_dem, debug=False)
+
+
     # Calculate the center of the plot as origin
     geotransform = dataset_rgb.GetGeoTransform()
     xinit = geotransform[0]
@@ -250,6 +268,7 @@ if __name__ == '__main__':
     plot_center_x = xinit + (plot_origin[0]+img.shape[1]/2)*xsize
     plot_center_y = yinit + (plot_origin[1]+img.shape[0]/2)*ysize
 
+    data['crops'] = []
     for i in range(len(shapes)):
         points = []
         for j in range(len(shapes['points'][i])):
@@ -275,7 +294,7 @@ if __name__ == '__main__':
 
 
         # Calc crop height
-        crop_height = calc_crop_height_from_dsm(pixel_values_dem, img, points, debug=False)
+        crop_height, crop_color = calc_crop_traits(pixel_values_dem, img, ExG_mask, points, debug=False)
         # Subtract base height
         crop_height = round(crop_height - base_height,3)
 
@@ -289,6 +308,7 @@ if __name__ == '__main__':
                 'row': int(geojson_gdf_plot.row),
                 'x': round(plant_loc_x,6),
                 'y': round(plant_loc_y,6),
+                'plant_color': crop_color.tolist(),
                 'plot_center_x': round(plot_center_x, 6),
                 'plot_center_y': round(plot_center_y, 6),
                 'width': plant_width,
@@ -298,12 +318,13 @@ if __name__ == '__main__':
         data['crops'].append(dict)
         # print(points)
 
+        
+        # Draw debug bounding box on image
+        cv2.rectangle(img, (points[0][0], points[0][1]), (points[1][0], points[1][1]), (0, 255, 0), 2)
 
-        # # Draw debug bounding box on image
-        # cv2.rectangle(img, (points[0][0], points[0][1]), (points[2][0], points[2][1]), (0, 255, 0), 2)
-        # cv2.imshow('image', img)
-        # cv2.waitKey(0)
-
+    if 1:
+        cv2.imshow('image', img)
+        cv2.waitKey(0)
 
     # Write the dictionary to a YAML file
     yaml_name = json_name.replace('.json', '.yaml')
