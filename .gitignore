@@ -39,3 +39,5 @@ DigitalSorghum/cmake-build-debug
 .idea
 .vscode/settings.json
 cmake-build-debug
+frames/*
+data/*

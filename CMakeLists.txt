@@ -21,11 +21,12 @@ add_subdirectory(libs/yaml-cpp)
 set( EXECUTABLE_NAME "DigitalCrops" )
 
 #provide name of source file(s) (separate multiple file names with semicolon)
-set( SOURCE_FILES "main.cpp" )
+#set( SOURCE_FILES "main.cpp" )
+set( SOURCE_FILES "main_cowpea_test.cpp" )
 
 #specify which plug-ins to use (separate plug-in names with semicolon)
 #set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposition;energybalance")
-set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition")
+set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition;plantarchitecture")
 
 
 #-------- DO NOT MODIFY ---------#
