@@ -48,7 +48,8 @@ int main(){
             vis.buildContextGeometry(&context);
 
             //        vis.plotInteractive();
-            vis.plotUpdate();
+            vis.plotUpdate(true);
+
             wait(1);
 
             std::stringstream framefile;

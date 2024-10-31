@@ -9,9 +9,9 @@ using namespace helios;
 int main(int argc, char* argv[]){
     // Export DISLAY=:10.0 to env variable
     // Set the environment variable. The third argument is non-zero to overwrite the value if it exists.
-    if (setenv("DISPLAY", ":10.0", 1) != 0) {
-        std::cerr << "Failed to set environment variable" << std::endl;
-    }
+    // if (setenv("DISPLAY", ":10.0", 1) != 0) {
+    //     std::cerr << "Failed to set environment variable" << std::endl;
+    // }
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <plant_string_file>" << std::endl;
@@ -34,10 +34,18 @@ int main(int argc, char* argv[]){
         }
     }
 
+    // Check if the grow flag is set
+    bool grow = false;
+    if (argc > 3) {
+        if (std::string(argv[3]) == "grow") {
+            grow = true;
+        }
+    }
+
     // Check if the -d flag is set
     bool debug = false;
-    if (argc > 3) {
-        if (std::string(argv[3]) == "debug") {
+    if (argc > 4) {
+        if (std::string(argv[4]) == "debug") {
             debug = true;
         }
     }
@@ -68,8 +76,6 @@ int main(int argc, char* argv[]){
     // Print input file name
     std::cout << "Plant string file: " << argv[1] << std::endl;
 
-    float growth_respiration = 0;  //grams CHO respired to produce 1 gram of dry weight
-    float maintainance_respiration_rate = 0; //grams CHO per gram dry weight per second
 
     Context context;
 
@@ -82,12 +88,13 @@ int main(int argc, char* argv[]){
     PlantArchitecture plantarchitecture(&context);
 
     plantarchitecture.loadPlantModelFromLibrary("cowpea");
+    plantarchitecture.buildPlantInstanceFromLibrary(nullorigin, 0);
     std::map<std::string,ShootParameters> shoot_parameters = plantarchitecture.getCurrentShootParameters();
     std::map<std::string, PhytomerParameters> phytomer_parameters;
     phytomer_parameters["unifoliate"] = shoot_parameters.at("unifoliate").phytomer_parameters;
     phytomer_parameters["trifoliate"] = shoot_parameters.at("trifoliate").phytomer_parameters;
 
-    plantarchitecture.generatePlantFromString(plantstring, phytomer_parameters); 
+    plantarchitecture.generatePlantFromString(plantstring, phytomer_parameters, nullorigin); 
 
     Visualizer vis(1200);
     vis.buildContextGeometry(&context);
@@ -109,20 +116,20 @@ int main(int argc, char* argv[]){
     std::string plant_model_file(argv[1]);
     // Get the file name only
     std::string name_only = plant_model_file.substr(plant_model_file.find_last_of("/\\") + 1);
-    std::string save_name = name_only.substr(0, plant_model_file.size() - 4)+ "_top.jpeg"; // Remove .txt and add "_top.jpeg");    
+    name_only = name_only.substr(0, name_only.size() - 4); // Remove .txt and add .jpeg
+    std::string save_name = name_only + "_top.jpeg"; // Remove .txt and add "_top.jpeg");    
     // Save to save dir
     std::string save_path = save_dir + "/" + save_name;
     vis.printWindow(save_path.c_str());
     
 
-
     if (rotation_view)
     {
         // Assuming you want to rotate the camera around the origin (0,0,0) in a circular path
         // and save images for each position. Let's do this for a full 360 degrees rotation.
-        const float min_radius = 0.5;               // Minimum distance from the origin (closest zoom)
-        const float max_radius = 1.2;               // Maximum distance from the origin (farthest zoom)
-        const float view_angle = 60;                // Field of view angle in degrees
+        const float min_radius = 0.3;               // Minimum distance from the origin (closest zoom) 0.5
+        const float max_radius = 1.0;               // Maximum distance from the origin (farthest zoom) 1.2
+        const float view_angle = 30;                // Field of view angle in degrees, 60
         const int num_steps = 72;                   // Number of steps in the rotation, adjust for more/less images
         const float step_angle = 360.0 / num_steps; // Angle step in degrees
 
@@ -143,10 +150,29 @@ int main(int argc, char* argv[]){
             vis.plotUpdate(true); // Update twice due to the mentioned bug
 
             // Generate output file name by replacing .txt with _angle.jpeg to differentiate between images
-            std::string plant_model_file(argv[1]);
-            std::string base_filename = plant_model_file.substr(0, plant_model_file.size() - 4); // Remove .txt
             std::stringstream framefile;
-            framefile << base_filename << "_" << i << ".jpeg"; // Append angle index to filename
+            framefile << name_only << "_" << i << ".jpeg"; // Append angle index to filename
+
+            // Save to save dir
+            std::string save_path = save_dir + "/" + framefile.str();
+            vis.printWindow(save_path.c_str());
+        }
+    }
+
+    if (grow) {
+        // PlantArchitecture plantarchitecture_grow(&context);
+        // plantarchitecture_grow.loadPlantModelFromLibrary("cowpea");
+        // plantarchitecture_grow.buildPlantInstanceFromLibrary(nullorigin, 0);
+        // Grow the plant for 10 days
+        for (int i = 0; i < 20; ++i) {
+            plantarchitecture.advanceTime(2);
+            vis.buildContextGeometry(&context);
+            vis.plotUpdate(true);
+            vis.plotUpdate(true); // Update twice due to the mentioned bug
+            
+            // Generate output file name by replacing .txt with _angle.jpeg to differentiate between images
+            std::stringstream framefile;
+            framefile << name_only << "_day" << i << ".jpeg"; // Append angle index to filename
 
             // Save to save dir
             std::string save_path = save_dir + "/" + framefile.str();
