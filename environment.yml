@@ -13,4 +13,6 @@ dependencies:
   - torchaudio
   - torchvision
   - ipykernel
+  - make
+  - cmake
 prefix: .conda

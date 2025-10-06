@@ -41,3 +41,6 @@ DigitalSorghum/cmake-build-debug
 cmake-build-debug
 frames/*
 data/*
+
+# Conda envs
+.env/*

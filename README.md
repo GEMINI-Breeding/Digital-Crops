@@ -7,7 +7,7 @@ TBD
 ## Digital-Sorghum
 Real to Syn and Syn to Real for GEMINI Sorghum using HELIOS
 <!-- Add Preview.png -->
-![Preview](Preview.png)
+![Preview](imgs/Preview.png)
 
 
 

@@ -1,0 +1,77 @@
+location: Davis
+year: 2023
+crop_types:
+- Cowpea
+- Common Beans
+- Sorghum
+crops:
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 105
+  y: 320
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 105
+  y: 412
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 101
+  y: 644
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 107
+  y: 738
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 107
+  y: 822
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 114
+  y: 900
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 114
+  y: 984
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 332
+  y: 356
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 332
+  y: 414
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 338
+  y: 625
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 335
+  y: 690
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 335
+  y: 852
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 336
+  y: 926
+- crop_type: Sorghum
+  bed: 0
+  row: 0
+  x: 342
+  y: 1044
