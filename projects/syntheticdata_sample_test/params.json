@@ -1,0 +1,36 @@
+{
+
+  "plantarchitecture": {
+
+    "initialize": {
+      "plant_count": { "sampling": "uniform", "min": 1.0, "max": 10.0 },
+      "plant_age": { "sampling": "uniform", "min": 10.0, "max": 100.0 },
+      "plant_spacing_x": { "sampling": "uniform", "min": 0.1, "max": 0.5 },
+      "plant_spacing_y": { "sampling": "uniform", "min": 0.1, "max": 0.5 }
+    },
+
+    "phytomer_parameters": {
+      "leaf_pitch": { "sampling": "uniform", "min": -90.0, "max": 90.0 }
+    },
+
+    "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
+  },
+
+  "cameraproperties": {
+
+    "camera_height": { "sampling": "uniform", "min": 1.0, "max": 4.0 },
+    "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 1.0 },
+    "lens_diameter": { "sampling": "uniform", "min": 0.0001, "max": 0.01 },
+    "HFOV": { "sampling": "uniform", "min": 30.0, "max": 90.0 },
+
+    "camera_positioning": {
+      "distance_from_center": { "sampling": "uniform", "min": 0.5, "max": 2.0 },
+      "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 360.0 },
+      "lookat_offset_x": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
+      "lookat_offset_y": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
+      "lookat_offset_z": { "sampling": "uniform", "min": 0.0, "max": 0.5 }
+    }
+
+  }
+
+}
