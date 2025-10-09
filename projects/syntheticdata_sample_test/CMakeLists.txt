@@ -5,7 +5,7 @@ project(helios)
 #-------- USER INPUTS ---------#
 
 #provide the path to Helios base directory, either as an absolut path or a path relative to the location of this file
-set( BASE_DIRECTORY "../.." )
+set( BASE_DIRECTORY "../../libs/Helios" )
 
 #define the name of the executable to be created
 set( EXECUTABLE_NAME "syntheticdata_sample_test" )

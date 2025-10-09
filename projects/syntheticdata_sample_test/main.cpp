@@ -58,7 +58,7 @@ int main(){
     std::mt19937 rng(rd());
 
     // Load parameters from JSON file once
-    json json_params = loadParametersFromJson("/home/eranario/CLionProjects/Helios/projects/syntheticdata_sample_test/params.json");
+    json json_params = loadParametersFromJson("../params.json");
 
     for (int iteration = 0; iteration < num_iterations; ++iteration) {
         std::cout << "\n=== Iteration " << (iteration + 1) << " of " << num_iterations << " ===" << std::endl;
