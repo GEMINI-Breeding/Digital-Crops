@@ -1,4 +1,24 @@
 {
+  "output_directory": "output",
+
+  "iterations": 100,
+
+  "plant": "cowpea",
+
+  "ground": {
+
+    "size_x": { "sampling": "constant", "value": 50.0 },
+    "size_y": { "sampling": "constant", "value": 50.0 },
+    "texture_file": "plugins/visualizer/textures/dirt.jpg"
+
+  },
+
+  "sun_position": {
+
+    "elevation_degrees": { "sampling": "constant", "value": 45.0 },
+    "azimuth_degrees": { "sampling": "constant", "value": 45.0 }
+
+  },
 
   "plantarchitecture": {
 
@@ -6,7 +26,8 @@
       "plant_count": { "sampling": "uniform", "min": 1.0, "max": 10.0 },
       "plant_age": { "sampling": "uniform", "min": 10.0, "max": 100.0 },
       "plant_spacing_x": { "sampling": "uniform", "min": 0.1, "max": 0.5 },
-      "plant_spacing_y": { "sampling": "uniform", "min": 0.1, "max": 0.5 }
+      "plant_spacing_y": { "sampling": "uniform", "min": 0.1, "max": 0.5 },
+      "num_columns": { "sampling": "uniform", "min": 1, "max": 3 }
     },
 
     "phytomer_parameters": {
@@ -14,10 +35,11 @@
     },
 
     "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
+
   },
 
   "cameraproperties": {
-
+    
     "camera_height": { "sampling": "uniform", "min": 1.0, "max": 4.0 },
     "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 1.0 },
     "lens_diameter": { "sampling": "uniform", "min": 0.0001, "max": 0.01 },
@@ -31,6 +53,27 @@
       "lookat_offset_z": { "sampling": "uniform", "min": 0.0, "max": 0.5 }
     }
 
-  }
+  },
 
+  "radiationmodel": {
+
+    "colorboard": "plugins/radiation/spectral_data/color_board/DGK_DKK_colorboard.xml",
+    
+    "leaf_surface_spectral_data": {
+      "file": "plugins/radiation/spectral_data/leaf_surface_spectral_library.xml",
+      "reflectivity": "grape_leaf_reflectivity_0000",
+      "transmissivity": "grape_leaf_transmissivity_0000"
+    },
+
+    "soil_surface_spectral_data": {
+      "file": "plugins/radiation/spectral_data/soil_surface_spectral_library.xml",
+      "reflectivity": "soil_reflectivity_0000"
+    },
+
+    "camera_spectral_data": {
+      "file": "plugins/radiation/spectral_data/camera_spectral_library.xml",
+      "camera_type": "Basler_acA2500-20gc"
+    }
+
+  }
 }
