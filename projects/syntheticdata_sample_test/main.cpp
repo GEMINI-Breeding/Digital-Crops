@@ -204,11 +204,11 @@ int main(){
         // assign colors to each object
         context.setPrimitiveData(UUIDs_plants, "reflectivity_spectrum", s.leaf_reflectivity);
         context.setPrimitiveData(UUIDs_plants, "transmissivity_spectrum", s.leaf_transmissivity);
-        // context.setPrimitiveData(UUIDs_ground, "reflectivity_spectrum", s.soil_reflectivity);
+        context.setPrimitiveData(UUIDs_ground, "reflectivity_spectrum", s.soil_reflectivity);
 
         // set specular properties for realistic shading
         context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
-        // context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
+        context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
 
         // prepare custom yellow color
         RadiationModel radiation(&context);
