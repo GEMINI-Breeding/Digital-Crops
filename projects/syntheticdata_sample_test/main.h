@@ -6,8 +6,15 @@
 #include <random>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 using json = nlohmann::json;
+
+// Forward declarations
+namespace helios {
+    class Context;
+    typedef unsigned int uint;
+}
 
 template<typename T>
 T sampleValue(const json& param, std::mt19937& rng) {
@@ -54,6 +61,8 @@ T sampleValue(const json& param, std::mt19937& rng) {
 struct SampledParameters {
     int plant_count;
     int num_columns;
+    int camera_resolution_x;
+    int camera_resolution_y;
 
     float ground_size_x;
     float ground_size_y;
@@ -73,8 +82,11 @@ struct SampledParameters {
     float lookat_offset_z;
     float elevation_degrees;
     float azimuth_degrees;
+    float ground_scale;
 
-    std::string texture_file;
+    bool use_obj_ground;
+    
+    std::string obj_file_path;
     std::string plant;
     std::string colorboard;
     std::string leaf_surface_spectral_data;
@@ -92,5 +104,9 @@ json buildSampledParametersJson(const SampledParameters& sampled);
 void logSampledParameters(const SampledParameters& sampled, const std::string& filename);
 
 json loadParametersFromJson(const std::string& filename);
+
+// OBJ ground functions
+std::vector<helios::uint> createObjGround(helios::Context& context, const SampledParameters& sampled);
+void generateMtlFile(const std::string& obj_path, float soil_color[3]);
 
 #endif // SYNTHETICDATA_SAMPLE_TEST_MAIN_H
