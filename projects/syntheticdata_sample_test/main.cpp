@@ -1,6 +1,7 @@
 #include "PlantArchitecture.h"
 #include "Visualizer.h"
 #include "RadiationModel.h"
+#include "LeafOptics.h"
 #include "json.hpp"
 #include "main.h"
 
@@ -86,6 +87,9 @@ SampledParameters sampleParameters(const json& json_params, std::mt19937& rng) {
     sampled.camera_spectral_data = json_params["radiationmodel"]["camera_spectral_data"]["file"];
     sampled.camera_type = json_params["radiationmodel"]["camera_spectral_data"]["camera_type"];
 
+    // leaf optics
+    sampled.chlorophyll_content = sampleValue<int>(json_params["leafoptics"]["chlorophyll_content"], rng);
+
     return sampled;
 }
 
@@ -141,6 +145,9 @@ json buildSampledParametersJson(const SampledParameters& sampled) {
     sampled_params["radiationmodel"]["camera_spectral_data"]["file"] = sampled.camera_spectral_data;
     sampled_params["radiationmodel"]["camera_spectral_data"]["camera_type"] = sampled.camera_type;
 
+    // leaf optics
+    sampled_params["leafoptics"]["chlorophyll_content"] = sampled.chlorophyll_content;
+
     return sampled_params;
 }
 
@@ -184,10 +191,16 @@ int main(){
         std::cout << "\n=== Iteration " << (iteration + 1) << " of " << num_iterations << " ===" << std::endl;
 
         Context context;
+        LeafOptics leafoptics( &context );
+        RadiationModel radiation(&context);
 
         // sample parameters
         SampledParameters sampled = sampleParameters(json_params, rng);
         const auto& s = sampled;
+
+        // initialize leaf optics
+        LeafOpticsProperties leafopticsprops;
+        leafopticsprops.chlorophyllcontent = s.chlorophyll_content;
 
         // filename with zero-padded iteration number
         std::stringstream filename_stream;
@@ -228,44 +241,46 @@ int main(){
         );
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
 
-        // create ground - either OBJ-based or tile-based
-        std::vector<uint> UUIDs_ground;
-        if (s.use_obj_ground) {
-            UUIDs_ground = createObjGround(context, s);
-        } else {
-            // load dirt texture with fixed size (original method)
-            // default: plugins/visualizer/textures/dirt.jpg
-            UUIDs_ground = context.addTile(
-                make_vec3(0,0,0), make_vec2(s.ground_size_x, s.ground_size_y), make_SphericalCoord(0,0), make_int2(10, 10)
-            );
-        }
-        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
-
         // load color and reflectivity data
         context.loadXML( s.colorboard.c_str(), true );
         context.loadXML( s.leaf_surface_spectral_data.c_str(), true );
         context.loadXML( s.soil_surface_spectral_data.c_str(), true );
         context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
         context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
-        context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple"); // purple/mauve for open flowers
+        context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
+        context.renameGlobalData("ColorReference_DGK_01", "spectrum_white");
+
+        // prepare custom flower colors
+        radiation.blendSpectra("reflectivity_flower_cowpea_closed", {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
+        radiation.blendSpectra("reflectivity_flower_cowpea_open", {"spectrum_purple", "spectrum_white"}, {0.10, 0.90}); // mostly white with purple tint
+
+        // create ground - either OBJ-based or tile-based
+        std::vector<uint> UUIDs_ground;
+        if (s.use_obj_ground) {
+            UUIDs_ground = createObjGround(context, s);
+        } else {
+            // load dirt texture with fixed size (original method)
+            UUIDs_ground = context.addTile(
+                make_vec3(0,0,0), make_vec2(s.ground_size_x, s.ground_size_y), make_SphericalCoord(0,0), make_int2(3000, 3000)
+            );
+        }
+        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
 
         // assign colors to each object
         context.setPrimitiveData(UUIDs_plants, "reflectivity_spectrum", s.leaf_reflectivity);
         context.setPrimitiveData(UUIDs_plants, "transmissivity_spectrum", s.leaf_transmissivity);
         context.setPrimitiveData(UUIDs_ground, "reflectivity_spectrum", s.soil_reflectivity);
-
+        
         // set specular properties for realistic shading
         context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
         context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
-
-        // prepare custom flower colors
-        RadiationModel radiation(&context);
-        radiation.blendSpectra("reflectivity_flower_cowpea_closed", {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
-        radiation.blendSpectra("reflectivity_flower_cowpea_open", {"spectrum_purple", "spectrum_green"}, {0.7, 0.3});
-
+        
         // get unique labels for flowers and apply colors based on open/closed state
         uint counter = 0;
         for (uint& id : plant_IDs) {
+
+
+            // update flower props
             std::vector<uint> IDs_flower = plantarchitecture.getPlantFlowerObjectIDs(id);
 
             for (uint& id_flower : IDs_flower) {
@@ -292,6 +307,14 @@ int main(){
                 
                 context.setPrimitiveData(uuids_flower, "flower", counter);
                 counter++;
+            }
+
+            // update leaf props
+            std::vector<uint> IDs_leaf = plantarchitecture.getPlantLeafObjectIDs(id);
+
+            for (uint& id_leaf : IDs_leaf) {
+                std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(id_leaf);
+                leafoptics.run(uuids_leaf, leafopticsprops, "example");
             }
         }
 

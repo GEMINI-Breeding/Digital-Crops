@@ -7,10 +7,10 @@
 
   "ground": {
 
-    "size_x": { "sampling": "constant", "value": 10.0 },
-    "size_y": { "sampling": "constant", "value": 10.0 },
+    "size_x": { "sampling": "constant", "value": 30.0 },
+    "size_y": { "sampling": "constant", "value": 30.0 },
 
-    "use_obj_ground": true,
+    "use_obj_ground": false,
     "obj_file_path": "../../../obj/dirt_rocks.obj",
     "ground_scale": { "sampling": "constant", "value": 0.1 }
 
@@ -66,8 +66,8 @@
     
     "leaf_surface_spectral_data": {
       "file": "plugins/radiation/spectral_data/leaf_surface_spectral_library.xml",
-      "reflectivity": "grape_leaf_reflectivity_0000",
-      "transmissivity": "grape_leaf_transmissivity_0000"
+      "reflectivity": "bean_leaf_reflectivity_0000",
+      "transmissivity": "bean_leaf_transmissivity_0000"
     },
 
     "soil_surface_spectral_data": {
@@ -79,6 +79,12 @@
       "file": "plugins/radiation/spectral_data/camera_spectral_library.xml",
       "camera_type": "Basler_acA2500-20gc"
     }
+
+  },
+
+  "leafoptics": {
+
+    "chlorophyll_content": { "sampling": "uniform", "min": 1.0, "max": 60.0 }
 
   }
 }

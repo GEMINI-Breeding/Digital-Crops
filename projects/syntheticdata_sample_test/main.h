@@ -61,15 +61,16 @@ T sampleValue(const json& param, std::mt19937& rng) {
 struct SampledParameters {
     int plant_count;
     int num_columns;
+    int plant_age;
+    int leaf_pitch;
     int camera_resolution_x;
     int camera_resolution_y;
+    int chlorophyll_content;
 
     float ground_size_x;
     float ground_size_y;
-    float plant_age;
     float plant_spacing_x;
     float plant_spacing_y;
-    float leaf_pitch;
     float flower_bud_break_probability;
     float camera_height;
     float focal_plane_distance_difference;
