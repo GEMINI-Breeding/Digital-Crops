@@ -1,8 +1,20 @@
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <random>
+#include <sstream>
+#include <algorithm>
+
+
+
+#include "PlantArchitecture.h"
 #include "Visualizer.h"
+#include "RadiationModel.h"
+#include "json.hpp"
 #include "CanopyGenerator.h"
 #include "SyntheticAnnotation.h"
-//#include "RadiationModel.h"
 #include "SolarPosition.h"
 //#include "EnergyBalanceModel.h"
 
@@ -10,26 +22,9 @@
 #include "utils.h"
 #include "yaml-cpp/yaml.h"
 
-using namespace helios;
-
-#include "PlantArchitecture.h"
-#include "Visualizer.h"
-#include "RadiationModel.h"
-#include "json.hpp"
-#include "main.h"
-
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <random>
-#include <sstream>
 
 using namespace helios;
 namespace fs = std::filesystem;
-
-
 
 //vec3 make_field(Context &context, std::string obj_path, YAML::Node config){
 std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node config){
@@ -379,13 +374,14 @@ int main(){
     std::cout << "Saved original parameters to: original_params.json\n" << std::endl;
 
     Context context;
+    std::vector<uint> plant_IDs;
     PlantArchitecture plantarchitecture(&context);
     for (int iteration = 0; iteration < num_crops; ++iteration) {
         std::cout << "\n=== Crop " << (iteration + 1) << " of " << num_crops << " ===" << std::endl;
-
+        
 
         // sample parameters - adds "sampled" values to the structure
-        json params = sampleParametersToJson(iteration, json_params, rng);
+        json sampled_params = sampleParametersToJson(iteration, json_params, rng);
 
         // filename with zero-padded iteration number
         std::stringstream filename_stream;
@@ -394,16 +390,20 @@ int main(){
         
         // save the parameters with sampled values for this crop
         std::ofstream params_file(output_dir + "/" + filename + "_params.json");
-        params_file << std::setw(4) << params << std::endl;
+        params_file << std::setw(4) << sampled_params << std::endl;
         params_file.close();
 
-        plantarchitecture.loadPlantModelFromLibrary(params["plants"]["crops"][0]["crop_type"]);
+        // Get crop type and convert to lowercase for plant library
+        std::string crop_type = sampled_params["plants"]["crops"][0]["crop_type"].get<std::string>();
+        std::transform(crop_type.begin(), crop_type.end(), crop_type.begin(), ::tolower);
+        
+        plantarchitecture.loadPlantModelFromLibrary(crop_type);
 
         std::map<std::string, ShootParameters> shoot_params = plantarchitecture.getCurrentShootParameters();
 
         // update leaf pitch and peduncle length
-        shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch = params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"]["sampled"];
-        shoot_params.at("trifoliate").flower_bud_break_probability = params["plantarchitecture"]["flower_bud_break_probability"]["sampled"];
+        shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch = sampled_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"]["sampled"];
+        shoot_params.at("trifoliate").flower_bud_break_probability = sampled_params["plantarchitecture"]["flower_bud_break_probability"]["sampled"];
 
         // update leaf
         shoot_params.at("trifoliate").phytomer_parameters.leaf.prototype.prototype_function = CowpeaLeafPrototype_trifoliate_OBJ;
@@ -416,178 +416,197 @@ int main(){
         plantarchitecture.optionalOutputObjectData("openflowerID");
 
         // plant count and age can be changed here
-        std::vector<uint> plant_IDs = plantarchitecture.buildPlantCanopyFromLibrary(
-            make_vec3(0, 0, 0), 
-            make_vec2(params["plantarchitecture"]["initialize"]["plant_spacing_x"]["sampled"], 
-                     params["plantarchitecture"]["initialize"]["plant_spacing_y"]["sampled"]),
-            make_int2(params["plantarchitecture"]["initialize"]["num_columns"]["sampled"], 
-                     params["plantarchitecture"]["initialize"]["plant_count"]["sampled"]), 
-            static_cast<int>(params["plantarchitecture"]["initialize"]["plant_age"]["sampled"].get<float>())
+        int bed = sampled_params["plants"]["crops"][0]["bed"];
+        int row = sampled_params["plants"]["crops"][0]["row"];
+        vec3 origin(0, 0, 0);
+        float X = sampled_params["plants"]["crops"][0]["x"];
+        float Y = sampled_params["plants"]["crops"][0]["y"];
+        // float Z = config["crops"][i]["Z"].as<float>();
+        vec3 plant_origin = origin + make_vec3(X, Y, 0);
+#if 1
+        uint plantID = plantarchitecture.buildPlantInstanceFromLibrary(
+            plant_origin,
+            static_cast<int>(sampled_params["plantarchitecture"]["initialize"]["plant_age"]["sampled"].get<float>())
         );
-        std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
-
-        // create ground - either OBJ-based or tile-based
-        std::vector<uint> UUIDs_ground;
-        if (params["ground"]["use_obj_ground"].get<bool>()) {
-            UUIDs_ground = createObjGround(context, params);
-        } else {
-            // load dirt texture with fixed size (original method)
-            // default: plugins/visualizer/textures/dirt.jpg
-            UUIDs_ground = context.addTile(
-                make_vec3(0,0,0), 
-                make_vec2(params["ground"]["size_x"]["sampled"].get<float>(), 
-                         params["ground"]["size_y"]["sampled"].get<float>()), 
-                make_SphericalCoord(0,0), make_int2(10, 10)
-            );
-        }
-        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
-
-        // load color and reflectivity data
-        context.loadXML( params["radiationmodel"]["colorboard"].get<std::string>().c_str(), true );
-        context.loadXML( params["radiationmodel"]["leaf_surface_spectral_data"]["file"].get<std::string>().c_str(), true );
-        context.loadXML( params["radiationmodel"]["soil_surface_spectral_data"]["file"].get<std::string>().c_str(), true );
-        context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
-        context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
-        context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple"); // purple/mauve for open flowers
-
-        // assign colors to each object
-        context.setPrimitiveData(UUIDs_plants, "reflectivity_spectrum", params["radiationmodel"]["leaf_surface_spectral_data"]["reflectivity"].get<std::string>());
-        context.setPrimitiveData(UUIDs_plants, "transmissivity_spectrum", params["radiationmodel"]["leaf_surface_spectral_data"]["transmissivity"].get<std::string>());
-        context.setPrimitiveData(UUIDs_ground, "reflectivity_spectrum", params["radiationmodel"]["soil_surface_spectral_data"]["reflectivity"].get<std::string>());
-
-        // set specular properties for realistic shading
-        context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
-        context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
-
-        // prepare custom flower colors
-        RadiationModel radiation(&context);
-        radiation.blendSpectra("reflectivity_flower_cowpea_closed", {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
-        radiation.blendSpectra("reflectivity_flower_cowpea_open", {"spectrum_purple", "spectrum_green"}, {0.7, 0.3});
-
-        // get unique labels for flowers and apply colors based on open/closed state
-        uint counter = 0;
-        for (uint& id : plant_IDs) {
-            std::vector<uint> IDs_flower = plantarchitecture.getPlantFlowerObjectIDs(id);
-
-            for (uint& id_flower : IDs_flower) {
-                std::vector<uint> uuids_flower = context.getObjectPrimitiveUUIDs(id_flower);
-                
-                // check if flower is open or closed based on object data
-                bool is_closed_flower = false;
-                bool is_open_flower = false;
-                
-                if (context.doesObjectDataExist(id_flower, "closedflowerID")) {
-                    is_closed_flower = true;
-                }
-                else if (context.doesObjectDataExist(id_flower, "openflowerID")) {
-                    is_open_flower = true;
-                }
-                
-                if (is_closed_flower) {
-                    context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_closed");
-                } else if (is_open_flower) {
-                    context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_open");
-                } else {
-                    context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_closed");
-                }
-                
-                context.setPrimitiveData(uuids_flower, "flower", counter);
-                counter++;
-            }
-        }
-
-        // add color calibration target (optional)
-        CameraCalibration calibration(&context);
-        calibration.addCalibriteColorboard(make_vec3(0,0.75,0.001), 0.025);
-
-        // set up sun lighting
-        SphericalCoord sun_dir = make_SphericalCoord(
-            deg2rad(params["sun_position"]["elevation_degrees"]["sampled"].get<float>()), 
-            -deg2rad(params["sun_position"]["azimuth_degrees"]["sampled"].get<float>())
+        plant_IDs.push_back(plantID);
+        std::cout << "Generated crop plantID:" << plantID << ", saved as: " << filename << std::endl;
+#else
+        std::vector<uint> plantID = plantarchitecture.buildPlantCanopyFromLibrary(
+            plant_origin, make_vec2(0, 0),
+            make_int2(1, 1), static_cast<int>(sampled_params["plantarchitecture"]["initialize"]["plant_age"]["sampled"].get<float>())
         );
-        uint sunID = radiation.addSunSphereRadiationSource(sun_dir);
-        radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
-
-        // create RGB radiation bands
-        radiation.addRadiationBand("red");
-        radiation.disableEmission("red");
-        radiation.setDiffuseRadiationExtinctionCoeff("red", 0.3f, sun_dir);
-        radiation.setScatteringDepth("red", 3);
-
-        radiation.copyRadiationBand("red", "green");
-        radiation.copyRadiationBand("red", "blue");
-
-        std::vector<std::string> bandlabels = {"red", "green", "blue"};
-        radiation.setDiffuseSpectrum( bandlabels, "solar_spectrum_diffuse_ASTMG173");
-
-        std::string cameralabel = "camera";
-
-        // camera params
-        CameraProperties cameraproperties;
-        cameraproperties.focal_plane_distance = params["cameraproperties"]["camera_height"]["sampled"].get<float>() - params["cameraproperties"]["focal_plane_distance_difference"]["sampled"].get<float>(); //focus on center of scene
-        cameraproperties.lens_diameter = params["cameraproperties"]["lens_diameter"]["sampled"].get<float>(); //make it small so it will be in focus
-        cameraproperties.HFOV = params["cameraproperties"]["HFOV"]["sampled"].get<float>();
-        cameraproperties.camera_resolution = make_int2(
-            params["cameraproperties"]["camera_resolution_x"]["sampled"].get<int>(), 
-            params["cameraproperties"]["camera_resolution_y"]["sampled"].get<int>()
-        );
-        vec3 camera_position(0, 0, 0);
-        vec3 camera_lookat(0, 0, 0);
-
-        // Calculate plant canopy center based on plant positioning
-        vec3 canopy_center = make_vec3(0, 0, 0); // Plants are positioned at origin
-
-        // Convert azimuth angle from degrees to radians
-        float azimuth_rad = deg2rad(params["cameraproperties"]["camera_positioning"]["azimuth_angle"]["sampled"].get<float>());
-
-        // Calculate camera position based on plant canopy center
-        camera_position.x = canopy_center.x + params["cameraproperties"]["camera_positioning"]["distance_from_center"]["sampled"].get<float>() * cos(azimuth_rad);
-        camera_position.y = canopy_center.y + params["cameraproperties"]["camera_positioning"]["distance_from_center"]["sampled"].get<float>() * sin(azimuth_rad);
-        camera_position.z = params["cameraproperties"]["camera_height"]["sampled"].get<float>();
-
-        // Calculate camera lookat point (slightly offset from canopy center)
-        camera_lookat.x = canopy_center.x + params["cameraproperties"]["camera_positioning"]["lookat_offset_x"]["sampled"].get<float>();
-        camera_lookat.y = canopy_center.y + params["cameraproperties"]["camera_positioning"]["lookat_offset_y"]["sampled"].get<float>();
-        camera_lookat.z = canopy_center.z + params["cameraproperties"]["camera_positioning"]["lookat_offset_z"]["sampled"].get<float>();
-
-        // add the camera to the radiation model
-        radiation.addRadiationCamera(cameralabel, bandlabels, camera_position, camera_lookat, cameraproperties, 100);
-
-        // set camera spectral response to simulate iPhone camera
-        context.loadXML( "plugins/radiation/spectral_data/camera_spectral_library.xml", true);
-        std::string camera_type = params["radiationmodel"]["camera_spectral_data"]["camera_type"].get<std::string>();
-        radiation.setCameraSpectralResponse(cameralabel, "red", (camera_type + "_red").c_str());
-        radiation.setCameraSpectralResponse(cameralabel, "green", (camera_type + "_green").c_str());
-        radiation.setCameraSpectralResponse(cameralabel, "blue", (camera_type + "_blue").c_str());
-
-        // update geometry and run radiation model
-        radiation.updateGeometry();
-        radiation.runBand(bandlabels);
-
-        // process image using standard pipeline
-        radiation.applyImageProcessingPipeline(cameralabel, "red", "green", "blue");
-
-        // save rendered RGB image with custom filename
-        std::string image_file = radiation.writeCameraImage(cameralabel, bandlabels, "RGB", output_dir, iteration);
-        std::string image_base = fs::path(image_file).stem().string();
-
-        // export bounding boxes and segmentation masks in COCO format
-        radiation.writeImageSegmentationMasks( cameralabel, {"flower"}, {0}, output_dir + '/' + filename + "_labels.json", image_file );
-
-        // auto-calibrate camera using colorboard reference values with quality report
-        std::string corrected_image = radiation.autoCalibrateCameraImage(cameralabel, "red", "green", "blue", output_dir + '/' + filename + ".jpeg", true);
-
-        // Delete the uncalibrated image after calibrated version is created
-        try {
-            if (fs::exists(image_file)) {
-                fs::remove(image_file);
-            }
-        } catch (const std::exception& e) {
-            std::cout << "  Warning: Could not delete uncalibrated image " << image_file << ": " << e.what() << std::endl;
-        }
-
-        std::cout << "Completed iteration " << (iteration + 1) << ", saved as: " << filename << std::endl;
+        plant_IDs.push_back(plantID[0]);
+        std::cout << "Generated crop plantID:" << plantID[0] << ", saved as: " << filename << std::endl;
+#endif
     }
+    
+    // Sampling for enviroment and radiation
+    json sampled_params = sampleParametersToJson(0, json_params, rng);
+
+    // create ground - either OBJ-based or tile-based
+    std::vector<uint> UUIDs_ground;
+    if (sampled_params["ground"]["use_obj_ground"].get<bool>()) {
+        UUIDs_ground = createObjGround(context, sampled_params);
+    } else {
+        // load dirt texture with fixed size (original method)
+        // default: plugins/visualizer/textures/dirt.jpg
+        UUIDs_ground = context.addTile(
+            make_vec3(0,0,0), 
+            make_vec2(sampled_params["ground"]["size_x"]['sampled'].get<float>(), 
+                        sampled_params["ground"]["size_y"]['sampled'].get<float>()), 
+            make_SphericalCoord(0,0), make_int2(10, 10)
+        );
+    }
+    context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
+
+    // load color and reflectivity data
+    context.loadXML( sampled_params["radiationmodel"]["colorboard"].get<std::string>().c_str(), true );
+    context.loadXML( sampled_params["radiationmodel"]["leaf_surface_spectral_data"]["file"].get<std::string>().c_str(), true );
+    context.loadXML( sampled_params["radiationmodel"]["soil_surface_spectral_data"]["file"].get<std::string>().c_str(), true );
+    context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
+    context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
+    context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple"); // purple/mauve for open flowers
+
+    // assign colors to each object
+    std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
+    context.setPrimitiveData(UUIDs_plants, "reflectivity_spectrum", sampled_params["radiationmodel"]["leaf_surface_spectral_data"]["reflectivity"].get<std::string>());
+    context.setPrimitiveData(UUIDs_plants, "transmissivity_spectrum", sampled_params["radiationmodel"]["leaf_surface_spectral_data"]["transmissivity"].get<std::string>());
+    context.setPrimitiveData(UUIDs_ground, "reflectivity_spectrum", sampled_params["radiationmodel"]["soil_surface_spectral_data"]["reflectivity"].get<std::string>());
+
+    // set specular properties for realistic shading
+    context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
+    context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
+
+    // prepare custom flower colors
+    RadiationModel radiation(&context);
+    radiation.blendSpectra("reflectivity_flower_cowpea_closed", {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
+    radiation.blendSpectra("reflectivity_flower_cowpea_open", {"spectrum_purple", "spectrum_green"}, {0.7, 0.3});
+
+    // get unique labels for flowers and apply colors based on open/closed state
+    uint counter = 0;
+    for (uint& id : plant_IDs) {
+        std::vector<uint> IDs_flower = plantarchitecture.getPlantFlowerObjectIDs(id);
+
+        for (uint& id_flower : IDs_flower) {
+            std::vector<uint> uuids_flower = context.getObjectPrimitiveUUIDs(id_flower);
+            
+            // check if flower is open or closed based on object data
+            bool is_closed_flower = false;
+            bool is_open_flower = false;
+            
+            if (context.doesObjectDataExist(id_flower, "closedflowerID")) {
+                is_closed_flower = true;
+            }
+            else if (context.doesObjectDataExist(id_flower, "openflowerID")) {
+                is_open_flower = true;
+            }
+            
+            if (is_closed_flower) {
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_closed");
+            } else if (is_open_flower) {
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_open");
+            } else {
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_closed");
+            }
+            
+            context.setPrimitiveData(uuids_flower, "flower", counter);
+            counter++;
+        }
+    }
+
+    std::string filename = "crop";
+    // add color calibration target (optional)
+    CameraCalibration calibration(&context);
+    calibration.addCalibriteColorboard(make_vec3(0,0.75,0.001), 0.025);
+
+    // set up sun lighting
+    SphericalCoord sun_dir = make_SphericalCoord(
+        deg2rad(sampled_params["sun_position"]["elevation_degrees"]["sampled"].get<float>()), 
+        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]["sampled"].get<float>())
+    );
+    uint sunID = radiation.addSunSphereRadiationSource(sun_dir);
+    radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
+
+    // create RGB radiation bands
+    radiation.addRadiationBand("red");
+    radiation.disableEmission("red");
+    radiation.setDiffuseRadiationExtinctionCoeff("red", 0.3f, sun_dir);
+    radiation.setScatteringDepth("red", 3);
+
+    radiation.copyRadiationBand("red", "green");
+    radiation.copyRadiationBand("red", "blue");
+
+    std::vector<std::string> bandlabels = {"red", "green", "blue"};
+    radiation.setDiffuseSpectrum( bandlabels, "solar_spectrum_diffuse_ASTMG173");
+
+    std::string cameralabel = "camera";
+
+    // camera params
+    CameraProperties cameraproperties;
+    cameraproperties.focal_plane_distance = sampled_params["cameraproperties"]["camera_height"]["sampled"].get<float>() - sampled_params["cameraproperties"]["focal_plane_distance_difference"]["sampled"].get<float>(); //focus on center of scene
+    cameraproperties.lens_diameter = sampled_params["cameraproperties"]["lens_diameter"]["sampled"].get<float>(); //make it small so it will be in focus
+    cameraproperties.HFOV = sampled_params["cameraproperties"]["HFOV"]["sampled"].get<float>();
+    cameraproperties.camera_resolution = make_int2(
+        sampled_params["cameraproperties"]["camera_resolution_x"]["sampled"].get<int>(), 
+        sampled_params["cameraproperties"]["camera_resolution_y"]["sampled"].get<int>()
+    );
+    vec3 camera_position(0, 0, 0);
+    vec3 camera_lookat(0, 0, 0);
+
+    // Calculate plant canopy center based on plant positioning
+    vec3 canopy_center = make_vec3(0, 0, 0); // Plants are positioned at origin
+
+    // Convert azimuth angle from degrees to radians
+    float azimuth_rad = deg2rad(sampled_params["cameraproperties"]["camera_positioning"]["azimuth_angle"]["sampled"].get<float>());
+
+    // Calculate camera position based on plant canopy center
+    camera_position.x = canopy_center.x + sampled_params["cameraproperties"]["camera_positioning"]["distance_from_center"]["sampled"].get<float>() * cos(azimuth_rad);
+    camera_position.y = canopy_center.y + sampled_params["cameraproperties"]["camera_positioning"]["distance_from_center"]["sampled"].get<float>() * sin(azimuth_rad);
+    camera_position.z = sampled_params["cameraproperties"]["camera_height"]["sampled"].get<float>();
+
+    // Calculate camera lookat point (slightly offset from canopy center)
+    camera_lookat.x = canopy_center.x + sampled_params["cameraproperties"]["camera_positioning"]["lookat_offset_x"]["sampled"].get<float>();
+    camera_lookat.y = canopy_center.y + sampled_params["cameraproperties"]["camera_positioning"]["lookat_offset_y"]["sampled"].get<float>();
+    camera_lookat.z = canopy_center.z + sampled_params["cameraproperties"]["camera_positioning"]["lookat_offset_z"]["sampled"].get<float>();
+
+    // add the camera to the radiation model
+    radiation.addRadiationCamera(cameralabel, bandlabels, camera_position, camera_lookat, cameraproperties, 100);
+
+    // set camera spectral response to simulate iPhone camera
+    context.loadXML( "plugins/radiation/spectral_data/camera_spectral_library.xml", true);
+    std::string camera_type = sampled_params["radiationmodel"]["camera_spectral_data"]["camera_type"].get<std::string>();
+    radiation.setCameraSpectralResponse(cameralabel, "red", (camera_type + "_red").c_str());
+    radiation.setCameraSpectralResponse(cameralabel, "green", (camera_type + "_green").c_str());
+    radiation.setCameraSpectralResponse(cameralabel, "blue", (camera_type + "_blue").c_str());
+
+    // update geometry and run radiation model
+    radiation.updateGeometry();
+    radiation.runBand(bandlabels);
+
+    // process image using standard pipeline
+    radiation.applyImageProcessingPipeline(cameralabel, "red", "green", "blue");
+
+    // save rendered RGB image with custom filename
+    std::string image_file = radiation.writeCameraImage(cameralabel, bandlabels, "RGB", output_dir, 0);
+    std::string image_base = fs::path(image_file).stem().string();
+
+    // export bounding boxes and segmentation masks in COCO format
+    radiation.writeImageSegmentationMasks( cameralabel, {"flower"}, {0}, output_dir + '/' + filename + "_labels.json", image_file );
+
+    // auto-calibrate camera using colorboard reference values with quality report
+    std::string corrected_image = radiation.autoCalibrateCameraImage(cameralabel, "red", "green", "blue", output_dir + '/' + filename + ".jpeg", true);
+
+    // Delete the uncalibrated image after calibrated version is created
+    try {
+        if (fs::exists(image_file)) {
+            fs::remove(image_file);
+        }
+    } catch (const std::exception& e) {
+        std::cout << "  Warning: Could not delete uncalibrated image " << image_file << ": " << e.what() << std::endl;
+    }
+
+        
+    
 
     std::cout << "\nCompleted all " << num_crops << " crops. Parameters saved to individual JSON files." << std::endl;
 

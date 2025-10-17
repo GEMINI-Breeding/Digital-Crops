@@ -4,105 +4,21 @@
   "plants": {
     "location": "Davis",
     "year": 2023,
-    "crop_types": ["Cowpea", "Common Beans", "Sorghum"],
+    "crop_types": ["cowpea", "bean", "sorghum"],
     "crops": [
       {
-        "crop_type": "Sorghum",
+        "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
-        "x": 105,
-        "y": 320
+        "x": 0.0,
+        "y": 0.0
       },
       {
-        "crop_type": "Sorghum",
+        "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
-        "x": 105,
-        "y": 412
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 101,
-        "y": 644
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 107,
-        "y": 738
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 107,
-        "y": 822
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 114,
-        "y": 900
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 114,
-        "y": 984
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 332,
-        "y": 356
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 332,
-        "y": 414
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 338,
-        "y": 625
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 335,
-        "y": 690
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 335,
-        "y": 852
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 336,
-        "y": 926
-      },
-      {
-        "crop_type": "Sorghum",
-        "bed": 0,
-        "row": 0,
-        "x": 342,
-        "y": 1044
+        "x": 0.0,
+        "y": 1.0
       }
     ]
   },
@@ -145,19 +61,19 @@
 
   "cameraproperties": {
     
-    "camera_height": { "sampling": "uniform", "min": 1.0, "max": 4.0 },
-    "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 1.0 },
-    "lens_diameter": { "sampling": "uniform", "min": 0.0001, "max": 0.01 },
-    "HFOV": { "sampling": "uniform", "min": 30.0, "max": 90.0 },
+    "camera_height": { "sampling": "uniform", "min": 1.5, "max": 1.5 },
+    "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
+    "lens_diameter": { "sampling": "uniform", "min": 0.01, "max": 0.01 },
+    "HFOV": { "sampling": "uniform", "min": 90, "max": 90.0 },
     "camera_resolution_x": { "sampling": "constant", "value": 1920 },
     "camera_resolution_y": { "sampling": "constant", "value": 1080 },
 
     "camera_positioning": {
-      "distance_from_center": { "sampling": "uniform", "min": 0.5, "max": 2.0 },
-      "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 360.0 },
-      "lookat_offset_x": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
-      "lookat_offset_y": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
-      "lookat_offset_z": { "sampling": "uniform", "min": 0.0, "max": 0.5 }
+      "distance_from_center": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
+      "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
+      "lookat_offset_x": { "sampling": "uniform", "min": 0, "max": 0.0 },
+      "lookat_offset_y": { "sampling": "uniform", "min": 0, "max": 0.0 },
+      "lookat_offset_z": { "sampling": "uniform", "min": 0.0, "max": 0.0 }
     }
 
   },

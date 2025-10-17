@@ -31,16 +31,31 @@
 *.out
 *.app
 
-# Build folder
+# Build folders
 build/
+build_release/
+*/build/
+*/build_release/
+**/build/
+**/build_release/
+cmake-build-*/
+**/cmake-build-*/
 DigitalSorghum/cmake-build-debug
 
 # IDE files
-.idea
+.idea/
 .vscode/settings.json
-cmake-build-debug
 frames/*
 data/*
 
 # Conda envs
 .env/*
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!*.cmake.in
