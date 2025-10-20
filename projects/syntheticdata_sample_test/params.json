@@ -37,7 +37,14 @@
       "leaf_pitch": { "sampling": "uniform", "min": -90.0, "max": 90.0 }
     },
 
-    "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
+    "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 },
+
+    "plots": {
+      "num_beds": { "sampling": "uniform", "min": 1, "max": 3 },
+      "num_rows": { "sampling": "uniform", "min": 1, "max": 3 },
+      "bed_spacing_x": { "sampling": "constant", "value": 1.0 },
+      "bed_spacing_y": { "sampling": "constant", "value": 1.0 }
+    }
 
   },
 
@@ -53,9 +60,9 @@
     "camera_positioning": {
       "distance_from_center": { "sampling": "uniform", "min": 0.5, "max": 2.0 },
       "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 360.0 },
-      "lookat_offset_x": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
-      "lookat_offset_y": { "sampling": "uniform", "min": -0.3, "max": 0.3 },
-      "lookat_offset_z": { "sampling": "uniform", "min": 0.0, "max": 0.5 }
+      "lookat_offset_x": { "sampling": "constant", "value": 0.0 },
+      "lookat_offset_y": { "sampling": "constant", "value": 0.0 },
+      "lookat_offset_z": { "sampling": "constant", "value": 0.0 }
     }
 
   },

@@ -63,6 +63,12 @@ SampledParameters sampleParameters(const json& json_params, std::mt19937& rng) {
     sampled.plant_spacing_y = sampleValue<float>(json_params["plantarchitecture"]["initialize"]["plant_spacing_y"], rng);
     sampled.leaf_pitch = sampleValue<float>(json_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"], rng);
     sampled.flower_bud_break_probability = sampleValue<float>(json_params["plantarchitecture"]["flower_bud_break_probability"], rng);
+    
+    // Multiple plots parameters
+    sampled.num_beds = sampleValue<int>(json_params["plantarchitecture"]["plots"]["num_beds"], rng);
+    sampled.num_rows = sampleValue<int>(json_params["plantarchitecture"]["plots"]["num_rows"], rng);
+    sampled.bed_spacing_x = sampleValue<float>(json_params["plantarchitecture"]["plots"]["bed_spacing_x"], rng);
+    sampled.bed_spacing_y = sampleValue<float>(json_params["plantarchitecture"]["plots"]["bed_spacing_y"], rng);
 
     // camera properties
     sampled.camera_height = sampleValue<float>(json_params["cameraproperties"]["camera_height"], rng);
@@ -121,6 +127,10 @@ json buildSampledParametersJson(const SampledParameters& sampled) {
     sampled_params["plantarchitecture"]["initialize"]["plant_spacing_y"] = sampled.plant_spacing_y;
     sampled_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"] = sampled.leaf_pitch;
     sampled_params["plantarchitecture"]["flower_bud_break_probability"] = sampled.flower_bud_break_probability;
+    sampled_params["plantarchitecture"]["plots"]["num_beds"] = sampled.num_beds;
+    sampled_params["plantarchitecture"]["plots"]["num_rows"] = sampled.num_rows;
+    sampled_params["plantarchitecture"]["plots"]["bed_spacing_x"] = sampled.bed_spacing_x;
+    sampled_params["plantarchitecture"]["plots"]["bed_spacing_y"] = sampled.bed_spacing_y;
 
     // camera properties
     sampled_params["cameraproperties"]["camera_height"] = sampled.camera_height;
@@ -169,13 +179,27 @@ std::vector<helios::uint> createObjGround(helios::Context& context, const Sample
     return UUIDs;
 }
 
-int main(){
+int main(int argc, char* argv[]){
 
     // load parameters
     json json_params = loadParametersFromJson("../params.json");
 
     // number of data samples
     const int num_iterations = json_params["iterations"]; // Change this to desired number of images
+    
+    // Check for starting iteration argument
+    int start_iteration = 0;
+    if (argc > 1) {
+        start_iteration = std::atoi(argv[1]);
+        if (start_iteration < 0) {
+            start_iteration = 0;
+        }
+        if (start_iteration >= num_iterations) {
+            std::cout << "Starting iteration (" << start_iteration << ") is >= total iterations (" << num_iterations << "). Nothing to do." << std::endl;
+            return 0;
+        }
+        std::cout << "Resuming from iteration " << start_iteration << std::endl;
+    }
 
     // prepare output dir
     std::string output_dir = json_params.value("output_directory", "output");
@@ -187,7 +211,7 @@ int main(){
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    for (int iteration = 0; iteration < num_iterations; ++iteration) {
+    for (int iteration = start_iteration; iteration < num_iterations; ++iteration) {
         std::cout << "\n=== Iteration " << (iteration + 1) << " of " << num_iterations << " ===" << std::endl;
 
         Context context;
@@ -234,11 +258,36 @@ int main(){
         plantarchitecture.optionalOutputObjectData("closedflowerID");
         plantarchitecture.optionalOutputObjectData("openflowerID");
 
-        // plant count and age can be changed here
-        std::vector<uint> plant_IDs = plantarchitecture.buildPlantCanopyFromLibrary(
-            make_vec3(0, 0, 0), make_vec2(s.plant_spacing_x, s.plant_spacing_y),
-            make_int2(s.num_columns, s.plant_count), static_cast<int>(s.plant_age)
-        );
+        // Create multiple plots in a grid pattern
+        std::vector<uint> all_plant_IDs;
+        
+        // Calculate grid positioning to center all plots
+        float total_bed_width = (s.num_beds - 1) * s.bed_spacing_x;
+        float total_bed_height = (s.num_rows - 1) * s.bed_spacing_y;
+        float start_x = -total_bed_width / 2.0f;
+        float start_y = -total_bed_height / 2.0f;
+        
+        std::cout << "Creating " << s.num_beds << "x" << s.num_rows << " plot grid..." << std::endl;
+        
+        for (int row = 0; row < s.num_rows; ++row) {
+            for (int bed = 0; bed < s.num_beds; ++bed) {
+                // Calculate position for this plot
+                float plot_x = start_x + bed * s.bed_spacing_x;
+                float plot_y = start_y + row * s.bed_spacing_y;
+                
+                // Create plants for this plot
+                std::vector<uint> plot_plant_IDs = plantarchitecture.buildPlantCanopyFromLibrary(
+                    make_vec3(plot_x, plot_y, 0), 
+                    make_vec2(s.plant_spacing_x, s.plant_spacing_y),
+                    make_int2(s.num_columns, s.plant_count), 
+                    static_cast<int>(s.plant_age)
+                );
+                
+                // Add to the total collection
+                all_plant_IDs.insert(all_plant_IDs.end(), plot_plant_IDs.begin(), plot_plant_IDs.end());
+            }
+        }
+        
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
 
         // load color and reflectivity data
@@ -276,12 +325,12 @@ int main(){
         context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
         
         // get unique labels for flowers and apply colors based on open/closed state
-        uint counter = 0;
-        for (uint& id : plant_IDs) {
+        uint flower_counter = 0;
+        uint pod_counter = 0;
+        for (uint& id : all_plant_IDs) {
 
-
-            // update flower props
             std::vector<uint> IDs_flower = plantarchitecture.getPlantFlowerObjectIDs(id);
+            std::vector<uint> IDs_pod = plantarchitecture.getPlantFruitObjectIDs(id);
 
             for (uint& id_flower : IDs_flower) {
                 std::vector<uint> uuids_flower = context.getObjectPrimitiveUUIDs(id_flower);
@@ -305,9 +354,16 @@ int main(){
                     context.setPrimitiveData(uuids_flower, "reflectivity_spectrum", "reflectivity_flower_cowpea_closed");
                 }
                 
-                context.setPrimitiveData(uuids_flower, "flower", counter);
-                counter++;
+                context.setPrimitiveData(uuids_flower, "flower", flower_counter);
+                flower_counter++;
             }
+ 
+            // for (uint& id_pod : IDs_pod) {
+            //     std::vector<uint> uuids_pod = context.getObjectPrimitiveUUIDs(id_pod);
+
+            //     context.setPrimitiveData(uuids_pod, "pod", pod_counter);
+            //     pod_counter++;
+            // }
 
             // update leaf props
             std::vector<uint> IDs_leaf = plantarchitecture.getPlantLeafObjectIDs(id);

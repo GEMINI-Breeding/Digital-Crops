@@ -62,6 +62,8 @@ struct SampledParameters {
     int plant_count;
     int num_columns;
     int plant_age;
+    int num_beds;
+    int num_rows;
     int leaf_pitch;
     int camera_resolution_x;
     int camera_resolution_y;
@@ -72,6 +74,8 @@ struct SampledParameters {
     float plant_spacing_x;
     float plant_spacing_y;
     float flower_bud_break_probability;
+    float bed_spacing_x;
+    float bed_spacing_y;
     float camera_height;
     float focal_plane_distance_difference;
     float lens_diameter;

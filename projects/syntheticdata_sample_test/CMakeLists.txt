@@ -14,7 +14,7 @@ set( EXECUTABLE_NAME "syntheticdata_sample_test" )
 set( SOURCE_FILES "main.cpp" )
 
 #specify which plug-ins to use (separate plug-in names with semicolon)
-set( PLUGINS "visualizer" ; "plantarchitecture" ; "radiation")
+set( PLUGINS "visualizer" ; "plantarchitecture" ; "radiation" ; "leafoptics" )
 
 #-------- DO NOT MODIFY ---------#
 include( "${BASE_DIRECTORY}/core/CMake_project.cmake" )
