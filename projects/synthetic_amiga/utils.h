@@ -51,4 +51,20 @@ T sampleValue(const json& param, std::mt19937& rng) {
     return T{}; // default value
 }
 
+// Forward declarations for Helios types
+namespace helios {
+    class Context;
+}
+
+// Forward declaration for CommandLineOptions (defined in main.h)
+struct CommandLineOptions;
+
+// Function declarations for command line parsing
+CommandLineOptions parseCommandLineArgs(int argc, char* argv[]);
+
+// Function declarations for JSON parameter handling
+json loadParametersFromJson(const std::string& filename);
+void addSampledValues(json& j, std::mt19937& rng);
+json sampleParametersToJson(int crop_index, const json& json_params, std::mt19937& rng);
+
 #endif // HELIOS_UTILS_H

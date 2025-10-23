@@ -5,10 +5,6 @@
 #ifndef HELIOS_MAIN_H
 #define HELIOS_MAIN_H
 
-// Field configuration
-#define BED_HEIGHT 0.2
-#define BED_WIDTH (BED_HEIGHT*10)
-#define BED_LENGTH (BED_HEIGHT*20)
 
 
 #include "json.hpp"
@@ -26,14 +22,25 @@ namespace helios {
     typedef unsigned int uint;
 }
 
-json loadParametersFromJson(const std::string& filename);
+// Command line options structure
+struct CommandLineOptions {
+    bool rotation_view = false;
+    bool grow = false;
+    bool debug = false;
+    bool save_xml = false;
+    bool stats_only = false;
+    bool fast = false;  // Run faster by running visualizer only?
+    float height = 1.0f;
+    int days = 0;
+    unsigned int seed = 0;
+    std::string tile_file;
+    std::string save_dir;
+    std::string plant_model_file;
+    std::string output_name;
+};
 
-// Recursively sample all parameters with "sampling" key and add "sampled" values in-place
-json sampleParametersToJson(int crop_index, const json& json_params, std::mt19937& rng);
-
-// OBJ ground functions
-std::vector<helios::uint> createObjGround(helios::Context& context, const json& sampled);
-void generateMtlFile(const std::string& obj_path, float soil_color[3]);
+// Function to parse command line arguments
+CommandLineOptions parseCommandLineArgs(int argc, char* argv[]);
 
 #endif //HELIOS_MAIN_H
 
