@@ -16,15 +16,43 @@
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
-        "x": -0.2,
-        "y": 0.5
+        "x": 0.2,
+        "y": -0.5
       },
-        {
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": -0.5
+      },
+      {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0.2,
-        "y": 1.5
+        "y": 0.0
+      },     
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": 0.0
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": 0.2,
+        "y": 1.0
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": 1.0
       }
     ]
   },
@@ -75,7 +103,7 @@
     "camera_resolution_y": { "sampling": "constant", "value": 1080 },
 
     "camera_positioning": {
-      "distance_from_center": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
+      "distance_from_center": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
       "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
       "lookat_offset_x": { "sampling": "uniform", "min": 0, "max": 0.0 },
       "lookat_offset_y": { "sampling": "uniform", "min": 0, "max": 0.0 },

@@ -174,9 +174,25 @@ int main(int argc, char* argv[]){
     for (int iteration = 0; iteration < num_plants; ++iteration) {
         std::cout << "\n=== plant " << (iteration + 1) << " of " << num_plants << " ===" << std::endl;
         
-        // sample parameters - adds "sampled" values to the structure
-        json sampled_params = sampleParametersToJson(iteration, json_params, rng);
-
+        // Create a copy of the params for this specific crop
+        json sampled_params = json_params;
+        
+        // Select the specific crop
+        if (sampled_params.contains("plot") && 
+            sampled_params["plot"].contains("plants") && 
+            sampled_params["plot"]["plants"].is_array() &&
+            iteration < sampled_params["plot"]["plants"].size()) {
+            
+            // Keep only the selected crop
+            json selected_crop = sampled_params["plot"]["plants"][iteration];
+            sampled_params["plot"]["plants"] = json::array({selected_crop});
+        }else{
+            printf("[ERROR] Can't find plot definitions\n");
+        }
+        
+        // Recursively add sampled values to all parameters with "sampling" key
+        addSampledValues(sampled_params, rng);
+        
         // filename with zero-padded iteration number
         std::stringstream filename_stream;
         filename_stream << output_name << "_plant_" << std::setw(4) << std::setfill('0') << iteration;
@@ -217,10 +233,7 @@ int main(int argc, char* argv[]){
         float Y = sampled_params["plot"]["plants"][0]["y"];
         // float Z = config["crops"][i]["Z"].as<float>();
         vec3 plant_origin = origin + make_vec3(X, Y, 0);
-        uint plantID = plantarchitecture.buildPlantInstanceFromLibrary(
-            plant_origin,
-            static_cast<int>(sampled_params["plantarchitecture"]["initialize"]["plant_age"]["sampled"].get<float>())
-        );
+        uint plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, 0);
         plant_IDs.push_back(plantID);
         std::cout << "Generated plant (ID:" << plantID << ")" << std::endl;
 
@@ -228,6 +241,15 @@ int main(int argc, char* argv[]){
     
     // Sampling for enviroment and radiation
     json sampled_env_params = sampleParametersToJson(0, json_params, rng);
+    
+    // Age all plants together after creation
+    if (!plant_IDs.empty()) {
+        float plant_age = static_cast<float>(sampled_env_params["plantarchitecture"]["initialize"]["plant_age"]["sampled"].get<float>());
+        if (plant_age > 0) {
+            plantarchitecture.advanceTime(plant_IDs, plant_age);
+            std::cout << "Advanced all plants to age: " << plant_age << " days" << std::endl;
+        }
+    }
 
     // create ground - either OBJ-based or tile-based
     std::vector<uint> UUIDs_ground;
@@ -427,13 +449,13 @@ int main(int argc, char* argv[]){
         std::string corrected_image = radiation.autoCalibrateCameraImage(cameralabel, "red", "green", "blue", output_dir + '/' + output_name + ".jpeg", true);
         
         // Delete the uncalibrated image after calibrated version is created
-        // try {
-            //     if (fs::exists(image_file)) {
-                //         fs::remove(image_file);
-                //     }
-                // } catch (const std::exception& e) {
-                    //     std::cout << "  Warning: Could not delete uncalibrated image " << image_file << ": " << e.what() << std::endl;
-                    // }
+        try {
+            if (fs::exists(image_file)) {
+                fs::remove(image_file);
+            }
+        } catch (const std::exception &e) {
+            std::cout << "  Warning: Could not delete uncalibrated image " << image_file << ": " << e.what() << std::endl;
+        }
     }
 
         
