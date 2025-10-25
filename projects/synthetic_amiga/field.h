@@ -32,4 +32,6 @@ std::vector<helios::uint> createObjGround(helios::Context& context, const json& 
 
 std::vector<uint> make_field(helios::Context& context, const json& params);
 
+uint json_get_num_plants(const json& params);
+
 #endif // HELIOS_FIELD_H

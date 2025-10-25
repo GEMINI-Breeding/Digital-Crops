@@ -59,12 +59,21 @@ namespace helios {
 // Forward declaration for CommandLineOptions (defined in main.h)
 struct CommandLineOptions;
 
-// Function declarations for command line parsing
-CommandLineOptions parseCommandLineArgs(int argc, char* argv[]);
 
 // Function declarations for JSON parameter handling
 json loadParametersFromJson(const std::string& filename);
 void addSampledValues(json& j, std::mt19937& rng);
-json sampleParametersToJson(int crop_index, const json& json_params, std::mt19937& rng);
+json sampleParams(json &j_input, std::mt19937 &rng);
+json sampleParametersToJson(int crop_index, const json &json_params, std::mt19937 &rng);
+
+
+// MIN and MAX macros
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
 
 #endif // HELIOS_UTILS_H

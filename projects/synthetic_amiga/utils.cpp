@@ -10,71 +10,7 @@
 
 using namespace helios;
 
-// Function to parse command line arguments
-CommandLineOptions parseCommandLineArgs(int argc, char* argv[]) {
-    CommandLineOptions options;
-    
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        
-        // Boolean flags (no additional argument needed)
-        if (arg == "-d") {
-            options.debug = true;
-        }else if (arg == "-r") {
-            options.rotation_view = true;
-        } else if (arg == "-g") {
-            options.grow = true;
-        } else if (arg == "-fast") {
-            options.fast = true;
-        } else if (arg == "-xml") {
-            options.save_xml = true;
-        } else if (arg == "-stats_only") {
-            options.stats_only = true;
-        }
-        // Options with values (requires next argument)
-        else if (arg == "-h" && i + 1 < argc) {
-            options.height = std::stof(argv[++i]);
-        } else if (arg == "-tile" && i + 1 < argc) {
-            options.tile_file = argv[++i];
-        } else if (arg == "-o" && i + 1 < argc) {
-            options.save_dir = argv[++i];
-            std::printf("Save dir: %s\n", options.save_dir.c_str());
-        } else if (arg == "-f" && i + 1 < argc) {
-            options.plant_model_file = argv[++i];
-        } else if (arg == "-days" && i + 1 < argc) {
-            options.days = std::stoi(argv[++i]);
-        } else if (arg == "-seed" && i + 1 < argc) {
-            options.seed = static_cast<unsigned int>(std::stoi(argv[++i]));
-            std::printf("Seed: %u\n", options.seed);
-        } else if (arg == "-name" && i + 1 < argc) {
-            options.output_name = argv[++i];
-            std::printf("Output name: %s\n", options.output_name.c_str());
-        } else if (arg == "--help" || arg == "-help") {
-            // Print help message
-            std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
-                      << "Options:\n"
-                      << "  -r              Enable rotation view\n"
-                      << "  -g              Enable grow mode\n"
-                      << "  -d              Enable debug mode\n"
-                      << "  -xml            Save XML output\n"
-                      << "  -stats_only     Only output statistics\n"
-                      << "  -h HEIGHT       Set height value\n"
-                      << "  -tile FILE      Set tile file path\n"
-                      << "  -o DIR          Set output directory\n"
-                      << "  -f FILE         Set plant model file\n"
-                      << "  -days N         Set number of days\n"
-                      << "  -seed N         Set random seed\n"
-                      << "  -name NAME      Set output name\n"
-                      << "  --help          Show this help message\n";
-            std::exit(0);
-        } else {
-            std::printf("Unknown argument: %s\n", arg.c_str());
-            std::printf("Use --help for usage information\n");
-        }
-    }
-    
-    return options;
-}
+
 
 // Function to load and parse JSON parameters
 json loadParametersFromJson(const std::string& filename) {
@@ -131,6 +67,18 @@ void addSampledValues(json& j, std::mt19937& rng) {
             addSampledValues(element, rng);
         }
     }
+}
+
+// Recursively find all parameters with "sampling" key and add "sampled" value
+json sampleParams(json& j_input, std::mt19937& rng) {
+    // Create a copy of the json
+    json j = j_input;
+
+    // Add sampled values
+    addSampledValues(j, rng);
+
+    // Return copied json object
+    return j;
 }
 
 // Sample parameters from JSON by adding "sampled" values to the original structure

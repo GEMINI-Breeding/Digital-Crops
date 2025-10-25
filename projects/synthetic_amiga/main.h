@@ -33,6 +33,7 @@ struct CommandLineOptions {
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
+    int start_iteration = 0;
     std::string tile_file;
     std::string save_dir;
     std::string plant_model_file;
