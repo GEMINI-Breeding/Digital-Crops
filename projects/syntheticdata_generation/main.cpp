@@ -68,23 +68,21 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 void init_camera(json sampled_params, CameraProperties& cameraproperties, 
                 vec3& camera_position, vec3& camera_lookat) {
     // camera params
-   
+    json cam_prop_json = sampled_params["cameraproperties"];
+    
+    // focus on center of scene
     cameraproperties.focal_plane_distance =
-        sampled_params["cameraproperties"]["camera_height"]["sampled"]
-            .get<float>() -
-        sampled_params["cameraproperties"]["focal_plane_distance_difference"]
-                      ["sampled"]
-                          .get<float>(); // focus on center of scene
+        cam_prop_json["camera_height"]["sampled"].get<float>() -
+        cam_prop_json["focal_plane_distance_difference"]["sampled"].get<float>(); 
+
+    // make it small so it will be in focus
     cameraproperties.lens_diameter =
-        sampled_params["cameraproperties"]["lens_diameter"]["sampled"]
-            .get<float>(); // make it small so it will be in focus
-    cameraproperties.HFOV =
-        sampled_params["cameraproperties"]["HFOV"]["sampled"].get<float>();
+        cam_prop_json["lens_diameter"]["sampled"].get<float>(); 
+
+    cameraproperties.HFOV = cam_prop_json["HFOV"]["sampled"].get<float>();
     cameraproperties.camera_resolution = make_int2(
-        sampled_params["cameraproperties"]["camera_resolution_x"]["sampled"]
-            .get<int>(),
-        sampled_params["cameraproperties"]["camera_resolution_y"]["sampled"]
-            .get<int>());
+        cam_prop_json["camera_resolution_x"]["sampled"].get<int>(),
+        cam_prop_json["camera_resolution_y"]["sampled"].get<int>());
 
 
     // Calculate plant canopy center based on plant positioning
@@ -92,38 +90,32 @@ void init_camera(json sampled_params, CameraProperties& cameraproperties,
 
     // Convert azimuth angle from degrees to radians
     float azimuth_rad =
-        deg2rad(sampled_params["cameraproperties"]["camera_positioning"]
+        deg2rad(cam_prop_json["camera_positioning"]
                               ["azimuth_angle"]["sampled"]
                                   .get<float>());
 
     // Calculate camera position based on plant canopy center
     camera_position.x = canopy_center.x +
-                        sampled_params["cameraproperties"]["camera_positioning"]
+                        cam_prop_json["camera_positioning"]
                                       ["distance_from_center"]["sampled"]
                                           .get<float>() *
                             cos(azimuth_rad);
     camera_position.y = canopy_center.y +
-                        sampled_params["cameraproperties"]["camera_positioning"]
+                        cam_prop_json["camera_positioning"]
                                       ["distance_from_center"]["sampled"]
                                           .get<float>() *
                             sin(azimuth_rad);
     camera_position.z =
-        sampled_params["cameraproperties"]["camera_height"]["sampled"]
+        cam_prop_json["camera_height"]["sampled"]
             .get<float>();
 
     // Calculate camera lookat point (slightly offset from canopy center)
-    camera_lookat.x = canopy_center.x +
-                      sampled_params["cameraproperties"]["camera_positioning"]
-                                    ["lookat_offset_x"]["sampled"]
-                                        .get<float>();
-    camera_lookat.y = canopy_center.y +
-                      sampled_params["cameraproperties"]["camera_positioning"]
-                                    ["lookat_offset_y"]["sampled"]
-                                        .get<float>();
-    camera_lookat.z = canopy_center.z +
-                      sampled_params["cameraproperties"]["camera_positioning"]
-                                    ["lookat_offset_z"]["sampled"]
-                                        .get<float>();
+    camera_lookat.x = canopy_center.x + cam_prop_json["camera_positioning"]
+                        ["lookat_offset_x"]["sampled"].get<float>();
+    camera_lookat.y = canopy_center.y + cam_prop_json["camera_positioning"]
+                        ["lookat_offset_y"]["sampled"].get<float>();
+    camera_lookat.z = canopy_center.z + cam_prop_json["camera_positioning"]
+                        ["lookat_offset_z"]["sampled"].get<float>();
 }
 
 
@@ -163,23 +155,16 @@ void init_radiation_model(Context &context,
                            {0.10, 0.90}); // mostly white with purple tint
 
     DEBUG_PRINT();
-    std::cout << UUIDs_plants.size() << std::endl;
 
     // load color and reflectivity data
     context.loadXML(sampled_params["radiationmodel"]["colorboard"]
-                        .get<std::string>()
-                        .c_str(),
-                    true);
+                        .get<std::string>().c_str(), true);
     context.loadXML(
         sampled_params["radiationmodel"]["leaf_surface_spectral_data"]["file"]
-            .get<std::string>()
-            .c_str(),
-        true);
+            .get<std::string>().c_str(), true);
     context.loadXML(
         sampled_params["radiationmodel"]["soil_surface_spectral_data"]["file"]
-            .get<std::string>()
-            .c_str(),
-        true);
+            .get<std::string>().c_str(), true);
     context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
     context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
     context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
@@ -369,8 +354,15 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.rotation_view = true;
         } else if (arg == "-g" || arg == "--grow") {
             options.grow = true;
-        } else if (arg == "--radiation") {
-            options.run_radiation = true;
+        } else if (arg == "--radiation" && i + 1 < argc) {
+            std::string radiation_flag = argv[++i];
+            if (radiation_flag == "false" || radiation_flag == "0") {
+                options.run_radiation = false;
+            } else if (radiation_flag == "true" || radiation_flag == "1") {
+                options.run_radiation = true;
+            } else {
+                std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
+            }
         } else if (arg == "--xml") {
             options.save_xml = true;
         } else if (arg == "--stats-only") {
@@ -400,21 +392,21 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             // Print help message
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
                       << "Options:\n"
-                      << "  -r, --rotation       Enable rotation view\n"
-                      << "  -g, --grow           Enable grow mode\n"
-                      << "  -d, --debug          Enable debug mode\n"
-                      << "  --xml                Save XML output\n"
-                      << "  --stats-only         Only output statistics\n"
-                      << "  --radiation          Run radiation model (default: enabled)\n"
-                      << "  -h, --height HEIGHT  Set height value (default: 1.0)\n"
-                      << "  -t, --tile FILE      Set tile file path\n"
-                      << "  -o, --output DIR     Set output directory (default: from params.json)\n"
-                      << "  -f, --file FILE      Set plant model file\n"
-                      << "  --days N             Set number of days (default: 0)\n"
-                      << "  -s, --seed N         Set random seed (default: random)\n"
-                      << "  -n, --name NAME      Set output name (default: 'plot')\n"
-                      << "  -i, --iteration N    Set start iteration (default: 0)\n"
-                      << "  --help               Show this help message\n";
+                      << "  -r, --rotation           Enable rotation view\n"
+                      << "  -g, --grow               Enable grow mode\n"
+                      << "  -d, --debug              Enable debug mode\n"
+                      << "  --xml                    Save XML output\n"
+                      << "  --stats-only             Only output statistics\n"
+                      << "  --radiation true|false   Run radiation model (default: true)\n"
+                      << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
+                      << "  -t, --tile FILE          Set tile file path\n"
+                      << "  -o, --output DIR         Set output directory (default: from params.json)\n"
+                      << "  -f, --file FILE          Set plant model file\n"
+                      << "  --days N                 Set number of days (default: 0)\n"
+                      << "  -s, --seed N             Set random seed (default: random)\n"
+                      << "  -n, --name NAME          Set output name (default: 'plot')\n"
+                      << "  -i, --iteration N        Set start iteration (default: 0)\n"
+                      << "  --help                   Show this help message\n";
             std::exit(0);
         } else {
             std::printf("Unknown argument: %s\n", arg.c_str());
@@ -497,7 +489,7 @@ int main(int argc, char *argv[]) {
 
         // filename with zero-padded iteration number
         std::stringstream filename_stream;
-        filename_stream << std::setw(4) << std::setfill('0') << i;
+        filename_stream << output_name << "_" << std::setw(4) << std::setfill('0') << i;
         std::string filename = filename_stream.str();
 
         // Recursively add "sampled" values to all parameters
@@ -590,12 +582,11 @@ int main(int argc, char *argv[]) {
                           
                 // filename with zero-padded plant number
                 std::stringstream filename_stream;
-                filename_stream << output_name << "_plant_" << std::setw(4)
+                filename_stream << filename << "_plant_" << std::setw(4)
                 << std::setfill('0') << j << ".xml";
-                std::string filename = filename_stream.str();
 
                 // Write the plant structure to an XML file
-                std::string xml_file = output_dir + "/" + filename;
+                std::string xml_file = output_dir + "/" + filename_stream.str();
                 plantarchitecture.writePlantStructureXML(plantID, xml_file);
             }
         } else {
@@ -613,12 +604,24 @@ int main(int argc, char *argv[]) {
             DEBUG_PRINT("OBJ ground created");
         } else {
             // load dirt texture with fixed size (original method)
-            UUIDs_ground = context.addTile(
-                make_vec3(0, 0, 0),
-                make_vec2(sampled_params["ground"]["size_x"]["sampled"],
-                        sampled_params["ground"]["size_y"]["sampled"]),
-                make_SphericalCoord(0, 0), make_int2(3000, 3000));
+            float ground_x = sampled_params["ground"]["size_x"]["sampled"];
+            float ground_y = sampled_params["ground"]["size_y"]["sampled"];
+            helios::vec3 tile_center = make_vec3(0, 0, 0);
+            helios::vec2 tile_size = make_vec2(1, 1);
+            helios::vec2 field_size = make_vec2(ground_x, ground_y);
+            int2 texture_repeat = make_int2(ground_x / tile_size.x, ground_y / tile_size.y);
+            // std::vector<uint> Context::addTile(const vec3 &center, const vec2
+            // &size, const SphericalCoord &rotation, const int2 &subdiv, const
+            // char *texturefile, const int2 &texture_repeat) {
+            UUIDs_ground = context.addTile(tile_center, field_size,
+                                           make_SphericalCoord(0, 0),
+                                           make_int2(3000, 3000), // Subdivision
+                                           "plugins/visualizer/textures/dirt.jpg",
+                                           texture_repeat);
         }
+
+
+
 
         // Age all plants together after creation
         if (!all_plant_IDs.empty()) {
@@ -635,18 +638,26 @@ int main(int argc, char *argv[]) {
         calibration.addCalibriteColorboard(make_vec3(0, 0.75, 0.001), 0.025);
 
         // Set camera
-        CameraProperties cameraproperties;
+        CameraProperties cam_prop;
         vec3 camera_position(0, 0, 0);
         vec3 camera_lookat(0, 0, 0);
-        init_camera(sampled_params, cameraproperties, camera_position, camera_lookat);
+        init_camera(sampled_params, cam_prop, camera_position, camera_lookat);
 
         // By default, run visualizer
-        Visualizer vis(cameraproperties.camera_resolution.x);
+        Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
+        if (args.debug || true) {
+            // Add a reference object
+            // uint Context::addPatch(const vec3 &center, const vec2 &size, const SphericalCoord &rotation, const char *texture_file) {
+            vec3 position(1, 1, 0.1); //(x,y,z) position of patch center
+            vec2 size(1, 1);        // length and width of patch
+            context.addPatch(position, size, make_SphericalCoord(0, 0), "../img_1x1.png");
+        }
         vis.clearGeometry();
         vis.buildContextGeometry(&context);
         vis.hideWatermark();
         vis.disableMessages();
-    
+
+
         // set up sun lighting
         SphericalCoord sun_dir = make_SphericalCoord(
             deg2rad(
@@ -662,9 +673,10 @@ int main(int argc, char *argv[]) {
         vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
         //vis.setLightingModel(Visualizer::LIGHTING_PHONG); // No shadow
         vis.setCameraPosition(camera_position, camera_lookat); 
+        vis.setCameraFieldOfView(cam_prop.HFOV);
         vis.plotUpdate(true);
         // Save the image to the file.
-        std::string save_path = output_dir + "/" + output_name + "_vis.jpeg";
+        std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
         vis.printWindow(save_path.c_str());
 
         if (args.debug) {
@@ -729,7 +741,7 @@ int main(int argc, char *argv[]) {
         if (args.run_radiation) {
             // Initialize the radiation model
             init_radiation_model(context, radiation, plantarchitecture,
-                                 leafoptics, cameraproperties, camera_position,
+                                 leafoptics, cam_prop, camera_position,
                                  camera_lookat, sampled_params, UUIDs_ground,
                                  UUIDs_plants);
 
@@ -753,13 +765,13 @@ int main(int argc, char *argv[]) {
             // export bounding boxes and segmentation masks in COCO format
             radiation.writeImageSegmentationMasks(
                 cameralabel, {"flower"}, {0},
-                output_dir + '/' + output_name + "_labels.json", image_file);
+                output_dir + '/' + filename + "_labels.json", image_file);
 
             // auto-calibrate camera using colorboard reference values with
             // quality report
             std::string corrected_image = radiation.autoCalibrateCameraImage(
                 cameralabel, "red", "green", "blue",
-                output_dir + '/' + output_name + ".jpeg", true);
+                output_dir + '/' + filename + ".jpeg", true);
 
             // Delete the uncalibrated image after calibrated version is created
             try {

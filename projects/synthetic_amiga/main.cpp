@@ -340,7 +340,7 @@ struct CommandLineOptions {
     bool debug = false;
     bool save_xml = false;
     bool stats_only = false;
-    bool run_radiation = true;  // Run faster if running without radiation?
+    bool vis_only = true;  // Run faster if running without radiation?
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
@@ -370,7 +370,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         } else if (arg == "-g" || arg == "--grow") {
             options.grow = true;
         } else if (arg == "--radiation") {
-            options.run_radiation = true;
+            options.vis_only = true;
         } else if (arg == "--xml") {
             options.save_xml = true;
         } else if (arg == "--stats-only") {
@@ -726,7 +726,7 @@ int main(int argc, char *argv[]) {
         // }
 
         // Run radiation model by default true
-        if (args.run_radiation) {
+        if (args.vis_only) {
             // Initialize the radiation model
             init_radiation_model(context, radiation, plantarchitecture,
                                  leafoptics, cameraproperties, camera_position,
