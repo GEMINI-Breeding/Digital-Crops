@@ -1,8 +1,8 @@
-name: .conda
+name: .env
 channels:
   - conda-forge
 dependencies:
-  - python=3.9
+  - python=3.12
   - geopandas
   - matplotlib
   - numpy
@@ -15,4 +15,3 @@ dependencies:
   - ipykernel
   - make
   - cmake
-prefix: .conda

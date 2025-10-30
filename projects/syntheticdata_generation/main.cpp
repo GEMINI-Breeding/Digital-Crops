@@ -334,6 +334,7 @@ struct CommandLineOptions {
     std::string save_dir;
     std::string plant_model_file;
     std::string output_name;
+    std::string params_file;
 };
 
 
@@ -367,9 +368,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.save_xml = true;
         } else if (arg == "--stats-only") {
             options.stats_only = true;
-        } 
-        // Options with values (requires next argument)
-        else if ((arg == "-h" || arg == "--height") && i + 1 < argc) {
+        } else if ((arg == "-h" || arg == "--height") && i + 1 < argc) {
             options.height = std::stof(argv[++i]);
         } else if ((arg == "-t" || arg == "--tile") && i + 1 < argc) {
             options.tile_file = argv[++i];
@@ -388,6 +387,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             std::printf("Output name: %s\n", options.output_name.c_str());
         } else if ((arg == "-i" || arg == "--iteration") && i + 1 < argc) {
             options.start_iteration = MAX(std::atoi(argv[++i]), 0);
+        } else if ((arg == "-p" || arg == "--params") && i + 1 < argc) {
+            options.params_file = argv[++i];
         } else if (arg == "--help") {
             // Print help message
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
@@ -427,7 +428,14 @@ int main(int argc, char *argv[]) {
     std::mt19937 rng(rd());
 
     // load parameters
-    json json_params = loadParametersFromJson("../params.json");
+    std::string params_file;
+    if (args.params_file.size() > 0) {
+        params_file = args.params_file;
+    } else {
+        params_file = "../params.json";
+    }
+    std::cout << "Loading " << params_file << std::endl;
+    json json_params = loadParametersFromJson(params_file);
 
     // prepare output dir
     std::string output_dir;
@@ -579,23 +587,14 @@ int main(int argc, char *argv[]) {
                 std::cout << "Generated plant (ID:" << plantID << ")"
                           << std::endl;
 
-                          
-                // filename with zero-padded plant number
-                std::stringstream filename_stream;
-                filename_stream << filename << "_plant_" << std::setw(4)
-                << std::setfill('0') << j << ".xml";
+    
 
-                // Write the plant structure to an XML file
-                std::string xml_file = output_dir + "/" + filename_stream.str();
-                plantarchitecture.writePlantStructureXML(plantID, xml_file);
             }
         } else {
             std::cout << "[WARN] plots mode is not defined or invalid!"
                       << std::endl;
             return 0;
         }
-
-        std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
 
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
@@ -620,17 +619,26 @@ int main(int argc, char *argv[]) {
                                            texture_repeat);
         }
 
-
-
-
+        std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         // Age all plants together after creation
-        if (!all_plant_IDs.empty()) {
+        if (!UUIDs_plants.empty()) {
             float plant_age = static_cast<int>(pa_init["plant_age"]["sampled"]);
             if (plant_age > 0) {
-                plantarchitecture.advanceTime(all_plant_IDs, plant_age);
+                plantarchitecture.advanceTime(UUIDs_plants, plant_age);
                 std::cout << "Advanced all plants to age: " << plant_age
                           << " days" << std::endl;
             }
+        }
+
+        for (int i = 0; i < UUIDs_plants.size(); i++) {
+            uint plantID = UUIDs_plants[i];
+            // Write the plant structure to an XML file
+            // filename with zero-padded plant number
+            std::stringstream filename_stream;
+            filename_stream << filename << "_plant_" << std::setw(4)
+                            << std::setfill('0') << i << ".xml";
+            std::string xml_file = output_dir + "/" + filename_stream.str();
+            plantarchitecture.writePlantStructureXML(plantID, xml_file);
         }
 
         // add color calibration target (required for RadiationModel::autoCalibrateCameraImage)
