@@ -325,13 +325,14 @@ struct CommandLineOptions {
     bool debug = false;
     bool save_xml = false;
     bool stats_only = false;
+    bool gui = false;
     bool run_radiation = true;  // Run faster if running without radiation?
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
     int start_iteration = 0;
     std::string tile_file;
-    std::string save_dir;
+    std::string output_dir;
     std::string plant_model_file;
     std::string output_name;
     std::string params_file;
@@ -351,44 +352,14 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             g_debug_mode = true;  // Set global debug flag
         } else if (arg == "-r" || arg == "--rotation") {
             options.rotation_view = true;
-        } else if (arg == "-r" || arg == "--rotation") {
-            options.rotation_view = true;
         } else if (arg == "-g" || arg == "--grow") {
             options.grow = true;
-        } else if (arg == "--radiation" && i + 1 < argc) {
-            std::string radiation_flag = argv[++i];
-            if (radiation_flag == "false" || radiation_flag == "0") {
-                options.run_radiation = false;
-            } else if (radiation_flag == "true" || radiation_flag == "1") {
-                options.run_radiation = true;
-            } else {
-                std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
-            }
         } else if (arg == "--xml") {
             options.save_xml = true;
         } else if (arg == "--stats-only") {
             options.stats_only = true;
-        } else if ((arg == "-h" || arg == "--height") && i + 1 < argc) {
-            options.height = std::stof(argv[++i]);
-        } else if ((arg == "-t" || arg == "--tile") && i + 1 < argc) {
-            options.tile_file = argv[++i];
-        } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
-            options.save_dir = argv[++i];
-            std::printf("Save dir: %s\n", options.save_dir.c_str());
-        } else if ((arg == "-f" || arg == "--file") && i + 1 < argc) {
-            options.plant_model_file = argv[++i];
-        } else if ((arg == "--days") && i + 1 < argc) {
-            options.days = std::stoi(argv[++i]);
-        } else if ((arg == "-s" || arg == "--seed") && i + 1 < argc) {
-            options.seed = static_cast<unsigned int>(std::stoi(argv[++i]));
-            std::printf("Seed: %u\n", options.seed);
-        } else if ((arg == "-n" || arg == "--name") && i + 1 < argc) {
-            options.output_name = argv[++i];
-            std::printf("Output name: %s\n", options.output_name.c_str());
-        } else if ((arg == "-i" || arg == "--iteration") && i + 1 < argc) {
-            options.start_iteration = MAX(std::atoi(argv[++i]), 0);
-        } else if ((arg == "-p" || arg == "--params") && i + 1 < argc) {
-            options.params_file = argv[++i];
+        } else if (arg == "--gui") {
+            options.gui = true;
         } else if (arg == "--help") {
             // Print help message
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
@@ -398,6 +369,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  -d, --debug              Enable debug mode\n"
                       << "  --xml                    Save XML output\n"
                       << "  --stats-only             Only output statistics\n"
+                      << "  --gui                    Enable GUI interactive mode\n"
                       << "  --radiation true|false   Run radiation model (default: true)\n"
                       << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
                       << "  -t, --tile FILE          Set tile file path\n"
@@ -409,10 +381,66 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  -i, --iteration N        Set start iteration (default: 0)\n"
                       << "  --help                   Show this help message\n";
             std::exit(0);
+        }
+        // Options with arguments
+        else if (i + 1 < argc) {
+            if (arg == "--radiation") {
+                std::string radiation_flag = argv[++i];
+                if (radiation_flag == "false" || radiation_flag == "0") {
+                    options.run_radiation = false;
+                } else if (radiation_flag == "true" || radiation_flag == "1") {
+                    options.run_radiation = true;
+                } else {
+                    std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
+                }
+            } else if (arg == "-h" || arg == "--height") {
+                options.height = std::stof(argv[++i]);
+            } else if (arg == "-t" || arg == "--tile") {
+                options.tile_file = argv[++i];
+            } else if (arg == "-o" || arg == "--output") {
+                options.output_dir = argv[++i];
+            } else if (arg == "-n" || arg == "--name") {
+                options.output_name = argv[++i];
+            } else if (arg == "-f" || arg == "--file") {
+                options.plant_model_file = argv[++i];
+            } else if (arg == "--days") {
+                options.days = std::stoi(argv[++i]);
+            } else if (arg == "-s" || arg == "--seed") {
+                options.seed = static_cast<unsigned int>(std::stoi(argv[++i]));
+                std::printf("Seed: %u\n", options.seed);
+            } else if (arg == "-i" || arg == "--iteration") {
+                options.start_iteration = std::max(std::atoi(argv[++i]), 0);
+            } else if (arg == "-p" || arg == "--params") {
+                options.params_file = argv[++i];
+            } else {
+                std::printf("Unknown argument: %s\n", arg.c_str());
+                std::printf("Use --help for usage information\n");
+            }
         } else {
             std::printf("Unknown argument: %s\n", arg.c_str());
             std::printf("Use --help for usage information\n");
         }
+    }
+
+    // Echo parsed arguments
+    if (g_debug_mode){
+        std::cout << "Parsed command line arguments:" << std::endl;
+        std::cout << "  rotation_view: " << (options.rotation_view ? "true" : "false") << std::endl;
+        std::cout << "  grow: " << (options.grow ? "true" : "false") << std::endl;
+        std::cout << "  debug: " << (options.debug ? "true" : "false") << std::endl;
+        std::cout << "  save_xml: " << (options.save_xml ? "true" : "false") << std::endl;
+        std::cout << "  stats_only: " << (options.stats_only ? "true" : "false") << std::endl;
+        std::cout << "  gui: " << (options.gui ? "true" : "false") << std::endl;
+        std::cout << "  run_radiation: " << (options.run_radiation ? "true" : "false") << std::endl;
+        std::cout << "  height: " << options.height << std::endl;
+        std::cout << "  days: " << options.days << std::endl;
+        std::cout << "  seed: " << options.seed << std::endl;
+        std::cout << "  start_iteration: " << options.start_iteration << std::endl;
+        std::cout << "  tile_file: '" << options.tile_file << "'" << std::endl;
+        std::cout << "  output_dir: '" << options.output_dir << "'" << std::endl;
+        std::cout << "  plant_model_file: '" << options.plant_model_file << "'" << std::endl;
+        std::cout << "  output_name: '" << options.output_name << "'" << std::endl;
+        std::cout << "  params_file: '" << options.params_file << "'" << std::endl;
     }
 
     return options;
@@ -423,9 +451,9 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments using dedicated function
     CommandLineOptions args = parseCommandLineArgs(argc, argv);
 
-    // Set up random device and random number
+    // Set up random device and random number generator
     std::random_device rd;
-    std::mt19937 rng(rd());
+    std::mt19937 rng(args.seed != 0 ? args.seed : rd());
 
     // load parameters
     std::string params_file;
@@ -439,23 +467,19 @@ int main(int argc, char *argv[]) {
 
     // prepare output dir
     std::string output_dir;
-    if (args.save_dir.size() > 0) {
-        output_dir = args.save_dir;
+    if (args.output_dir.size() > 0) {
+        output_dir = args.output_dir;
     } else {
         output_dir = json_params.value("output_directory", "output");
     }
-
+    // Create output dir
     if (!fs::exists(output_dir)) {
         fs::create_directories(output_dir);
     }
     std::cout << "Output directory: " << output_dir << std::endl;
 
-    std::string output_name;
-    if (args.output_name.size() > 0) {
-        output_name = args.output_name;
-    } else {
-        output_name = "plot";
-    }
+    // Get output name
+    std::string output_name = args.output_name.size() > 0 ? args.output_name : "plot";
 
     // Save the original parameters once (shared across all crops)
     std::ofstream original_params_file(output_dir + "/original_params.json");
@@ -586,9 +610,6 @@ int main(int argc, char *argv[]) {
                 all_plant_IDs.push_back(plantID);
                 std::cout << "Generated plant (ID:" << plantID << ")"
                           << std::endl;
-
-    
-
             }
         } else {
             std::cout << "[WARN] plots mode is not defined or invalid!"
@@ -630,18 +651,22 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        for (int i = 0; i < UUIDs_plants.size(); i++) {
-            uint plantID = UUIDs_plants[i];
-            // Write the plant structure to an XML file
-            // filename with zero-padded plant number
-            std::stringstream filename_stream;
-            filename_stream << filename << "_plant_" << std::setw(4)
-                            << std::setfill('0') << i << ".xml";
-            std::string xml_file = output_dir + "/" + filename_stream.str();
-            plantarchitecture.writePlantStructureXML(plantID, xml_file);
+        
+        // Write the plant structure to an XML file
+        if (args.save_xml) {
+            for (int i = 0; i < UUIDs_plants.size(); i++) {
+                uint plantID = UUIDs_plants[i];
+                // filename with zero-padded plant number
+                std::stringstream filename_stream;
+                filename_stream << filename << "_plant_" << std::setw(4)
+                << std::setfill('0') << i << ".xml";
+                std::string xml_file_name = output_dir + "/" + filename_stream.str();
+                plantarchitecture.writePlantStructureXML(plantID, xml_file_name);
+            }
         }
 
-        // add color calibration target (required for RadiationModel::autoCalibrateCameraImage)
+        // add color calibration target 
+        // required for RadiationModel::autoCalibrateCameraImage)
         CameraCalibration calibration(&context);
         calibration.addCalibriteColorboard(make_vec3(0, 0.75, 0.001), 0.025);
 
@@ -653,12 +678,12 @@ int main(int argc, char *argv[]) {
 
         // By default, run visualizer
         Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
-        if (args.debug || true) {
+        if (args.debug) {
             // Add a reference object
-            // uint Context::addPatch(const vec3 &center, const vec2 &size, const SphericalCoord &rotation, const char *texture_file) {
-            vec3 position(1, 1, 0.1); //(x,y,z) position of patch center
-            vec2 size(1, 1);        // length and width of patch
-            context.addPatch(position, size, make_SphericalCoord(0, 0), "../img_1x1.png");
+            vec3 position(1, 1, 0.1);       //(x,y,z) position of patch center
+            vec2 size(1, 1);                // length and width of patch
+            SphericalCoord coord(1, 0, 0);  // r=1, el=0, az=0, 
+            context.addPatch(position, size, coord, "../img_1x1.png");
         }
         vis.clearGeometry();
         vis.buildContextGeometry(&context);
@@ -687,8 +712,8 @@ int main(int argc, char *argv[]) {
         std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
         vis.printWindow(save_path.c_str());
 
-        if (args.debug) {
-            // plotInteractive for debug mode
+        if (args.gui) {
+            // plotInteractive for GUI mode
             vis.plotInteractive();
         }
 

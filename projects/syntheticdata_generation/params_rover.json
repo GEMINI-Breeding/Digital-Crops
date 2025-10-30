@@ -1,0 +1,151 @@
+{
+  "output_directory": "output",
+
+  "iterations": 1,
+
+  "plant": "cowpea",
+
+  "plots": {
+    "mode": "manual",
+    "location": "Davis",
+    "year": 2023,
+    "crop_types": ["cowpea", "bean", "sorghum"],
+    "num_beds": { "sampling": "uniform", "min": 1, "max": 1 },
+    "num_rows": { "sampling": "uniform", "min": 1, "max": 1 },
+    "bed_spacing_x": { "sampling": "constant", "value": 1.0 },
+    "bed_spacing_y": { "sampling": "constant", "value": 1.0 },
+    "bed_height": 0.2,
+    "bed_width": 2,
+    "bed_length": 4,
+    "soil_color": [0.61, 0.58, 0.55],
+    "crops": [
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": 0.2,
+        "y": -0.5
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": -0.5
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": 0.2,
+        "y": 0.0
+      },     
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": 0.0
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": 0.2,
+        "y": 1.0
+      },
+      {
+        "crop_type": "cowpea",
+        "bed": 0,
+        "row": 0,
+        "x": -0.2,
+        "y": 1.0
+      }
+    ]
+  },
+
+  "ground": {
+
+    "size_x": { "sampling": "constant", "value": 10.0 },
+    "size_y": { "sampling": "constant", "value": 10.0 },
+
+    "use_obj_ground": false,
+    "obj_file_path": "../../../obj/dirt_rocks.obj",
+    "ground_scale": { "sampling": "constant", "value": 0.1 }
+
+  },
+
+  "sun_position": {
+
+    "elevation_degrees": { "sampling": "constant", "value": 45.0 },
+    "azimuth_degrees": { "sampling": "constant", "value": 45.0 }
+
+  },
+
+  "plantarchitecture": {
+
+    "initialize": {
+      "plant_count": { "sampling": "uniform", "min": 1.0, "max": 10.0 },
+      "plant_age": { "sampling": "uniform", "min": 60.0, "max": 60.0 },
+      "plant_spacing_x": { "sampling": "uniform", "min": 0.1, "max": 0.5 },
+      "plant_spacing_y": { "sampling": "uniform", "min": 0.1, "max": 0.5 },
+      "num_columns": { "sampling": "uniform", "min": 1, "max": 2 }
+    },
+
+    "phytomer_parameters": {
+      "leaf_pitch": { "sampling": "uniform", "min": -90.0, "max": 90.0 }
+    },
+
+    "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
+
+  },
+
+  "cameraproperties": {
+    
+    "camera_height": { "sampling": "uniform", "min": 1.5, "max": 1.5 },
+    "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
+    "lens_diameter": { "sampling": "constant", "value": 0.0028 },
+    "HFOV": { "sampling": "constant", "value": 108.0 },
+    "camera_resolution_x": { "sampling": "constant", "value": 1920 },
+    "camera_resolution_y": { "sampling": "constant", "value": 1080 },
+
+    "camera_positioning": {
+      "distance_from_center": { "sampling": "uniform", "min": 0.01, "max": 0.01 },
+      "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
+      "lookat_offset_x": { "sampling": "constant", "value": 0.0 },
+      "lookat_offset_y": { "sampling": "constant", "value": 0.0 },
+      "lookat_offset_z": { "sampling": "constant", "value": 0.0 }
+    }
+
+  },
+
+  "radiationmodel": {
+
+    "colorboard": "plugins/radiation/spectral_data/color_board/DGK_DKK_colorboard.xml",
+    "bandlabels": ["red", "green", "blue"],
+    "cameralabel": "camera",
+    "leaf_surface_spectral_data": {
+      "file": "plugins/radiation/spectral_data/leaf_surface_spectral_library.xml",
+      "reflectivity": "bean_leaf_reflectivity_0000",
+      "transmissivity": "bean_leaf_transmissivity_0000"
+    },
+
+    "soil_surface_spectral_data": {
+      "file": "plugins/radiation/spectral_data/soil_surface_spectral_library.xml",
+      "reflectivity": "soil_reflectivity_0000"
+    },
+
+    "camera_spectral_data": {
+      "file": "plugins/radiation/spectral_data/camera_spectral_library.xml",
+      "camera_type": "Basler_acA2500-20gc"
+    }
+
+  },
+
+  "leafoptics": {
+
+    "chlorophyll_content": { "sampling": "uniform", "min": 1.0, "max": 60.0 }
+
+  }
+
+}
