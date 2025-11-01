@@ -2,6 +2,7 @@
 #include "main.h"
 #include "Context.h"
 #include "CanopyGenerator.h"
+#include "utils.h"
 #include "yaml-cpp/yaml.h"
 #include <fstream>
 #include <cstdio>
@@ -9,71 +10,6 @@
 
 using namespace helios;
 
-// std::vector<uint> make_field(Context &context, std::string obj_path, YAML::Node config){
-
-//     int n_beds = config["n_beds"].as<int>(); 
-//     int n_rows = config["n_rows"].as<int>(); 
-
-//     // Manipulate mtl file before loading OBJ file
-//     std::string orig_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl.orig";
-
-//     // Replace numbers with soil color in the config
-//     float soil_color[3];
-//     if (config["soil_color"])
-//     {   int cnt = 0;
-//         for (YAML::const_iterator it = config["soil_color"].begin(); it != config["soil_color"].end(); ++it)
-//         {
-//             // Push to the array
-//             soil_color[cnt] = it->as<float>();
-//             cnt++;
-//         }
-        
-//         // Rewrite the mtl file
-//         // Remove the mtl file if it exists
-//         std::string new_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl";
-//         std::remove(new_mtl_path.c_str());
-        
-//         std::ofstream file(new_mtl_path);
-//         file << "# Blender MTL File: 'None'\n";
-//         file << "# Material Count: 1\n\n";
-//         file << "newmtl None\n";
-//         file << "Ns 500.000001\n";
-//         file << "Ka " << soil_color[0] << " " << soil_color[1] << " " << soil_color[2] << "\n";
-//         file << "Kd " << soil_color[0]*0.8 << " " << soil_color[1]*0.8 << " " << soil_color[2]*0.8 << "\n";
-//         file << "Ks " << soil_color[0]*0.8 << " " << soil_color[1]*0.8 << " " << soil_color[2]*0.8 << "\n";
-//         file << "Ke 0.000000 0.000000 0.000000\n";
-//         file << "Ni 1.450000\n";
-//         file << "d 1.000000\n";
-//         file << "illum 2\n";
-
-//         file.close();
-//     }
-
-//     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), BED_HEIGHT, nullrotation, RGB::white);
-//     // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
-//     vec3 center(0,0,0);
-//     // Total UUIDs
-//     std::vector<uint> UUIDs_total;
-//     for(int bed = 0;bed < n_beds;bed++){
-//         for(int row=0;row<n_rows;row++){
-//             float x = bed * BED_WIDTH;
-//             float y = row * BED_LENGTH;
-//             float z = 0;
-
-//             // Make a vector of x y z origin
-//             vec3 origin(x,y,z);
-//             center += origin;
-//             std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
-//             //context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
-
-//             // Append UUIDs_copy to UUIDs_total
-//             UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
-//         }
-//     }
-//     center = center / (n_beds * n_rows);
-//     //return center;
-//     return UUIDs_total;
-// }
 
 std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context, YAML::Node config){
     // Canopy generator model
@@ -154,9 +90,9 @@ std::vector<helios::uint> createObjGround(helios::Context& context, const json& 
 
 std::vector<uint> make_field(helios::Context& context, const json& params) {
 
-    auto config = params["plot"];
-    int n_beds = config["n_beds"].get<int>(); 
-    int n_rows = config["n_rows"].get<int>(); 
+    auto config = params["plots"];
+    int n_beds = config["num_beds"]["sampled"].get<int>(); 
+    int n_rows = config["num_rows"]["sampled"].get<int>(); 
     
     std::string obj_path = params["ground"]["obj_file_path"].get<std::string>();
 
@@ -197,27 +133,50 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
     }
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), config["bed_height"], nullrotation, RGB::white);
+
+    // Rescale the loaded OBJ to match bed dimensions (width, length, height)
+    vec3 bed_extent = make_vec3(config["bed_width"].get<float>(), config["bed_length"].get<float>(), config["bed_height"].get<float>());
+    rescaleUUIDsToSize(context, UUIDs, bed_extent);
+
+    // Compute bounding box for the original OBJ once, since it's the same for all copies
+    helios::vec3 min_corner, max_corner, extent;
+    getBoundingBoxAndExtent(context, UUIDs, min_corner, max_corner, extent);
+    helios::vec3 bbox_center = (min_corner + max_corner) * 0.5f;
+
     // vec3 for center of the field. It will be calculated by averaging the x and y of all the field
-    vec3 center(0,0,0);
+    
+    // Copy and paste fields
     // Total UUIDs
+    vec3 center(0,0,0);
     std::vector<uint> UUIDs_total;
     for(int bed = 0;bed < n_beds;bed++){
-        for(int row=0;row<n_rows;row++){
-            float x = bed * config["bed_width"].get<float>();
-            float y = row * config["bed_length"].get<float>();
-            float z = 0;
-
-            // Make a vector of x y z origin
-            vec3 origin(x,y,z);
-            center += origin;
-            std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
-            //context.translatePrimitive(UUIDs_copy, make_vec3(x,y,z));
-
-            // Append UUIDs_copy to UUIDs_total
-            UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
+        for(int row = 0;row<n_rows;row++){
+            if (bed == 0 && row == 0) {
+                // Already generated
+                // Append UUIDs_copy to UUIDs_total
+                UUIDs_total.insert(UUIDs_total.end(), UUIDs.begin(), UUIDs.end());
+            } else {
+                // Use object extent for positioning instead of config values
+                float x = bed * extent.x;
+                float y = row * extent.y;
+                float z = 0;
+                
+                // Make a vector of x y z origin
+                vec3 origin(x,y,z);
+                center += origin;
+                std::vector<uint> UUIDs_copy = context.copyPrimitive(UUIDs);
+                
+                // Translate to position at (x,y,z) centered using precomputed bbox_center
+                //context.translatePrimitive(UUIDs_copy, make_vec3(x, y, z) - bbox_center);
+                context.translatePrimitive(UUIDs_copy, make_vec3(x, y, z));
+                
+                // Append UUIDs_copy to UUIDs_total
+                UUIDs_total.insert(UUIDs_total.end(), UUIDs_copy.begin(), UUIDs_copy.end());
+            }
         }
     }
     center = center / (n_beds * n_rows);
+    
     //return center;
     return UUIDs_total;
 }

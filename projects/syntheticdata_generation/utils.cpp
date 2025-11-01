@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <iostream>
+#include <limits>  // For std::numeric_limits
 
 using namespace helios;
 
@@ -101,6 +102,67 @@ json sampleParametersToJson(int crop_index, const json& json_params, std::mt1993
     addSampledValues(params_copy, rng);
     
     return params_copy;
+}
+
+// Function to compute bounding box and extent for a vector of UUIDs
+void getBoundingBoxAndExtent(helios::Context& context, const std::vector<uint>& UUIDs, 
+                             vec3& min_corner, vec3& max_corner, 
+                             vec3& extent) {
+    if (UUIDs.empty()) {
+        // Handle empty case (set defaults or throw error)
+        min_corner = make_vec3(0, 0, 0);
+        max_corner = make_vec3(0, 0, 0);
+        extent = make_vec3(0, 0, 0);
+        return;
+    }
+
+    // Initialize with extreme values
+    float min_x = std::numeric_limits<float>::max();
+    float min_y = std::numeric_limits<float>::max();
+    float min_z = std::numeric_limits<float>::max();
+    float max_x = std::numeric_limits<float>::lowest();
+    float max_y = std::numeric_limits<float>::lowest();
+    float max_z = std::numeric_limits<float>::lowest();
+
+    // Iterate through each UUID and update min/max
+    for (uint uuid : UUIDs) {
+        vec3 min_c, max_c;
+        context.getPrimitiveBoundingBox(uuid, min_c, max_c);
+        min_x = std::min(min_x, min_c.x);
+        min_y = std::min(min_y, min_c.y);
+        min_z = std::min(min_z, min_c.z);
+        max_x = std::max(max_x, max_c.x);
+        max_y = std::max(max_y, max_c.y);
+        max_z = std::max(max_z, max_c.z);
+    }
+
+    // Set output bounding box corners
+    min_corner = make_vec3(min_x, min_y, min_z);
+    max_corner = make_vec3(max_x, max_y, max_z);
+
+    // Compute extent (size in each dimension)
+    extent = max_corner - min_corner;
+}
+
+// Function to rescale a set of UUIDs to a specific target extent
+void rescaleUUIDsToSize(helios::Context& context, const std::vector<uint>& UUIDs, const vec3& target_extent) {
+    if (UUIDs.empty()) {
+        return;  // Nothing to scale
+    }
+
+    // Get current bounding box and extent
+    vec3 min_corner, max_corner, current_extent;
+    getBoundingBoxAndExtent(context, UUIDs, min_corner, max_corner, current_extent);
+
+    // Compute scale factors (avoid division by zero)
+    vec3 scale = make_vec3(
+        (current_extent.x > 0) ? (target_extent.x / current_extent.x) : 1.0f,
+        (current_extent.y > 0) ? (target_extent.y / current_extent.y) : 1.0f,
+        (current_extent.z > 0) ? (target_extent.z / current_extent.z) : 1.0f
+    );
+
+    // Apply scaling
+    context.scalePrimitive(UUIDs, scale);
 }
 
 

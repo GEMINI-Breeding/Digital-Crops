@@ -23,7 +23,6 @@ namespace helios {
 }
 
 
-
 // Global debug flag
 extern bool g_debug_mode;
 

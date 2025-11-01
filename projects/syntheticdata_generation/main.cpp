@@ -28,6 +28,13 @@ namespace fs = std::filesystem;
 // Global debug flag definition
 bool g_debug_mode = false;
 
+// Camera setup structure to bundle related parameters
+struct CameraSetup {
+    CameraProperties cam_prop;
+    vec3 camera_position;
+    vec3 camera_lookat;
+    SphericalCoord sun_dir;
+};
 
 void init_plant_architecture(PlantArchitecture& plantarchitecture,
                              Context& context, json sampled_params) {
@@ -65,25 +72,29 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
 }
 
-void init_camera(json sampled_params, CameraProperties& cameraproperties, 
-                vec3& camera_position, vec3& camera_lookat) {
+CameraSetup init_camera(json sampled_params) {
+    CameraSetup setup;
+    
     // camera params
     json cam_prop_json = sampled_params["cameraproperties"];
     
     // focus on center of scene
-    cameraproperties.focal_plane_distance =
+    setup.cam_prop.focal_plane_distance =
         cam_prop_json["camera_height"]["sampled"].get<float>() -
         cam_prop_json["focal_plane_distance_difference"]["sampled"].get<float>(); 
 
     // make it small so it will be in focus
-    cameraproperties.lens_diameter =
+    setup.cam_prop.lens_diameter =
         cam_prop_json["lens_diameter"]["sampled"].get<float>(); 
 
-    cameraproperties.HFOV = cam_prop_json["HFOV"]["sampled"].get<float>();
-    cameraproperties.camera_resolution = make_int2(
+    setup.cam_prop.HFOV = cam_prop_json["HFOV"]["sampled"].get<float>();
+    setup.cam_prop.camera_resolution = make_int2(
         cam_prop_json["camera_resolution_x"]["sampled"].get<int>(),
         cam_prop_json["camera_resolution_y"]["sampled"].get<int>());
 
+    setup.cam_prop.FOV_aspect_ratio =
+        float(setup.cam_prop.camera_resolution.x) /
+        float(setup.cam_prop.camera_resolution.y);
 
     // Calculate plant canopy center based on plant positioning
     vec3 canopy_center = make_vec3(0, 0, 0); // Plants are positioned at origin
@@ -95,27 +106,35 @@ void init_camera(json sampled_params, CameraProperties& cameraproperties,
                                   .get<float>());
 
     // Calculate camera position based on plant canopy center
-    camera_position.x = canopy_center.x +
+    setup.camera_position.x = canopy_center.x +
                         cam_prop_json["camera_positioning"]
                                       ["distance_from_center"]["sampled"]
                                           .get<float>() *
                             cos(azimuth_rad);
-    camera_position.y = canopy_center.y +
+    setup.camera_position.y = canopy_center.y +
                         cam_prop_json["camera_positioning"]
                                       ["distance_from_center"]["sampled"]
                                           .get<float>() *
                             sin(azimuth_rad);
-    camera_position.z =
+    setup.camera_position.z =
         cam_prop_json["camera_height"]["sampled"]
             .get<float>();
 
     // Calculate camera lookat point (slightly offset from canopy center)
-    camera_lookat.x = canopy_center.x + cam_prop_json["camera_positioning"]
+    setup.camera_lookat.x = canopy_center.x + cam_prop_json["camera_positioning"]
                         ["lookat_offset_x"]["sampled"].get<float>();
-    camera_lookat.y = canopy_center.y + cam_prop_json["camera_positioning"]
+    setup.camera_lookat.y = canopy_center.y + cam_prop_json["camera_positioning"]
                         ["lookat_offset_y"]["sampled"].get<float>();
-    camera_lookat.z = canopy_center.z + cam_prop_json["camera_positioning"]
+    setup.camera_lookat.z = canopy_center.z + cam_prop_json["camera_positioning"]
                         ["lookat_offset_z"]["sampled"].get<float>();
+
+    setup.sun_dir = make_SphericalCoord(
+        deg2rad(sampled_params["sun_position"]["elevation_degrees"]["sampled"]
+                    .get<float>()),
+        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]["sampled"]
+                     .get<float>()));
+    
+    return setup;
 }
 
 
@@ -123,9 +142,7 @@ void init_radiation_model(Context &context,
                           RadiationModel &radiation,
                           PlantArchitecture &plantarchitecture,
                           LeafOptics& leafoptics,
-                          CameraProperties& cameraproperties, 
-                          vec3& camera_position, 
-                          vec3& camera_lookat,
+                          const CameraSetup& camera_setup,
                           json sampled_params,
                           std::vector<uint> UUIDs_ground,
                           std::vector<uint> UUIDs_plants) {
@@ -262,18 +279,13 @@ void init_radiation_model(Context &context,
     }
 
     // set up sun lighting
-    SphericalCoord sun_dir = make_SphericalCoord(
-        deg2rad(sampled_params["sun_position"]["elevation_degrees"]["sampled"]
-                    .get<float>()),
-        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]["sampled"]
-                     .get<float>()));
-    uint sunID = radiation.addSunSphereRadiationSource(sun_dir);
+    uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
     radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
 
     // create RGB radiation bands
     radiation.addRadiationBand("red");
     radiation.disableEmission("red");
-    radiation.setDiffuseRadiationExtinctionCoeff("red", 0.3f, sun_dir);
+    radiation.setDiffuseRadiationExtinctionCoeff("red", 0.3f, camera_setup.sun_dir);
     radiation.setScatteringDepth("red", 3);
 
     radiation.copyRadiationBand("red", "green");
@@ -285,8 +297,8 @@ void init_radiation_model(Context &context,
     std::string cameralabel = "camera";    
 
     // add the camera to the radiation model
-    radiation.addRadiationCamera(cameralabel, bandlabels, camera_position,
-                                 camera_lookat, cameraproperties, 100);
+    radiation.addRadiationCamera(cameralabel, bandlabels, camera_setup.camera_position,
+                                 camera_setup.camera_lookat, camera_setup.cam_prop, 100);
 
     // set camera spectral response to simulate iPhone camera
     context.loadXML(
@@ -586,6 +598,9 @@ int main(int argc, char *argv[]) {
             }
             std::cout << "Number of crops: " << num_crops << std::endl;
 
+            float bed_width = sampled_params["plots"]["bed_width"];
+            float bed_length = sampled_params["plots"]["bed_length"];
+
             for (int j = 0; j < num_crops; j++) {
                 // Select the specific crop
                 json selected_crop = sampled_params["plots"]["crops"][j];
@@ -603,6 +618,8 @@ int main(int argc, char *argv[]) {
                 int row = selected_crop["row"];
                 float X = selected_crop["x"];
                 float Y = selected_crop["y"];
+                origin.x = bed * bed_width;
+                origin.y = row * bed_length;
                 // float Z = config["crops"][i]["Z"].as<float>();
                 vec3 plant_origin = origin + make_vec3(X, Y, 0);
                 uint plantID = plantarchitecture.buildPlantInstanceFromLibrary(
@@ -620,7 +637,8 @@ int main(int argc, char *argv[]) {
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
         if (sampled_params["ground"]["use_obj_ground"].get<bool>()) {
-            UUIDs_ground = createObjGround(context, sampled_params);
+            //UUIDs_ground = createObjGround(context, sampled_params);
+            UUIDs_ground = make_field(context, sampled_params);
             DEBUG_PRINT("OBJ ground created");
         } else {
             // load dirt texture with fixed size (original method)
@@ -635,7 +653,7 @@ int main(int argc, char *argv[]) {
             // char *texturefile, const int2 &texture_repeat) {
             UUIDs_ground = context.addTile(tile_center, field_size,
                                            make_SphericalCoord(0, 0),
-                                           make_int2(3000, 3000), // Subdivision
+                                           make_int2(1000, 1000), // Subdivision
                                            "plugins/visualizer/textures/dirt.jpg",
                                            texture_repeat);
         }
@@ -671,16 +689,19 @@ int main(int argc, char *argv[]) {
         calibration.addCalibriteColorboard(make_vec3(0, 0.75, 0.001), 0.025);
 
         // Set camera
-        CameraProperties cam_prop;
-        vec3 camera_position(0, 0, 0);
-        vec3 camera_lookat(0, 0, 0);
-        init_camera(sampled_params, cam_prop, camera_position, camera_lookat);
+        CameraSetup camera_setup = init_camera(sampled_params);
+        CameraProperties cam_prop = camera_setup.cam_prop;
+        vec3 camera_position = camera_setup.camera_position;
+        vec3 camera_lookat = camera_setup.camera_lookat;
+        SphericalCoord sun_dir = camera_setup.sun_dir;
 
         // By default, run visualizer
         Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
+        
+        // Add debug patch
         if (args.debug) {
             // Add a reference object
-            vec3 position(1, 1, 0.1);       //(x,y,z) position of patch center
+            vec3 position(0, 0, 0.1);       //(x,y,z) position of patch center
             vec2 size(1, 1);                // length and width of patch
             SphericalCoord coord(1, 0, 0);  // r=1, el=0, az=0, 
             context.addPatch(position, size, coord, "../img_1x1.png");
@@ -690,23 +711,11 @@ int main(int argc, char *argv[]) {
         vis.hideWatermark();
         vis.disableMessages();
 
-
         // set up sun lighting
-        SphericalCoord sun_dir = make_SphericalCoord(
-            deg2rad(
-                sampled_params["sun_position"]["elevation_degrees"]["sampled"]
-                    .get<float>()),
-            -deg2rad(
-                sampled_params["sun_position"]["azimuth_degrees"]["sampled"]
-                    .get<float>()));
-
-        // Convert SphericalCoord to direction vector
-        vec3 sun_direction = sphere2cart(sun_dir);
-        vis.setLightDirection(sun_direction);
+        vis.setLightDirection(sphere2cart(sun_dir));
         vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-        //vis.setLightingModel(Visualizer::LIGHTING_PHONG); // No shadow
         vis.setCameraPosition(camera_position, camera_lookat); 
-        vis.setCameraFieldOfView(cam_prop.HFOV);
+        vis.setCameraFieldOfView(cam_prop.HFOV / cam_prop.FOV_aspect_ratio);
         vis.plotUpdate(true);
         // Save the image to the file.
         std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
@@ -774,9 +783,8 @@ int main(int argc, char *argv[]) {
         if (args.run_radiation) {
             // Initialize the radiation model
             init_radiation_model(context, radiation, plantarchitecture,
-                                 leafoptics, cam_prop, camera_position,
-                                 camera_lookat, sampled_params, UUIDs_ground,
-                                 UUIDs_plants);
+                                 leafoptics, camera_setup, sampled_params,
+                                 UUIDs_ground, UUIDs_plants);
 
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
             std::string cameralabel = "camera";

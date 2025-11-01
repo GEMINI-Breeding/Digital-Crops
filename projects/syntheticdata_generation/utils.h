@@ -2,6 +2,7 @@
 #define HELIOS_UTILS_H
 
 #include "json.hpp"
+#include "Context.h"
 #include <random>
 #include <string>
 #include <type_traits>
@@ -65,6 +66,15 @@ json loadParametersFromJson(const std::string& filename);
 void addSampledValues(json& j, std::mt19937& rng);
 json sampleParams(json &j_input, std::mt19937 &rng);
 json sampleParametersToJson(int crop_index, const json &json_params, std::mt19937 &rng);
+
+
+// Function to compute bounding box and extent for a vector of UUIDs
+void getBoundingBoxAndExtent(helios::Context& context, const std::vector<unsigned int>& UUIDs, 
+                             helios::vec3& min_corner, helios::vec3& max_corner, 
+                             helios::vec3& extent);
+
+// Function to rescale a set of UUIDs to a specific target extent
+void rescaleUUIDsToSize(helios::Context& context, const std::vector<unsigned int>& UUIDs, const helios::vec3& target_extent);
 
 
 // MIN and MAX macros
