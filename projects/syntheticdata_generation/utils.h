@@ -67,6 +67,12 @@ void addSampledValues(json& j, std::mt19937& rng);
 json sampleParams(json &j_input, std::mt19937 &rng);
 json sampleParametersToJson(int crop_index, const json &json_params, std::mt19937 &rng);
 
+// Field-of-view helper functions
+// HFOV_deg: horizontal FOV in degrees
+// aspect_ratio: width / height
+float HFOVtoVFOV(float HFOV_deg, float aspect_ratio);
+float HFOVtoDFOV(float HFOV_deg, float aspect_ratio);
+
 
 // Function to compute bounding box and extent for a vector of UUIDs
 void getBoundingBoxAndExtent(helios::Context& context, const std::vector<unsigned int>& UUIDs, 

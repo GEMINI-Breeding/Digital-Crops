@@ -72,7 +72,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
 }
 
-CameraSetup init_camera(json sampled_params) {
+CameraSetup init_camera(Context& context, const std::vector<uint>& UUIDs_plants, json sampled_params) {
     CameraSetup setup;
     
     // camera params
@@ -96,14 +96,21 @@ CameraSetup init_camera(json sampled_params) {
         float(setup.cam_prop.camera_resolution.x) /
         float(setup.cam_prop.camera_resolution.y);
 
-    // Calculate plant canopy center based on plant positioning
-    vec3 canopy_center = make_vec3(0, 0, 0); // Plants are positioned at origin
+    // Calculate plant canopy center based on plant positions or default to origin
+    vec3 canopy_center = make_vec3(0, 0, 0);
+    if (!UUIDs_plants.empty() && cam_prop_json["camera_positioning"]["center_plants"]) {
+        vec3 min_corner, max_corner, extent;
+        getBoundingBoxAndExtent(context, UUIDs_plants, min_corner, max_corner, extent);
+        canopy_center = (min_corner + max_corner) * 0.5f;
+    }
 
     // Convert azimuth angle from degrees to radians
     float azimuth_rad =
         deg2rad(cam_prop_json["camera_positioning"]
                               ["azimuth_angle"]["sampled"]
                                   .get<float>());
+                                // Assuming looking the x axis direction
+                                // towards zero when azimuth_angle=0
 
     // Calculate camera position based on plant canopy center
     setup.camera_position.x = canopy_center.x +
@@ -689,7 +696,7 @@ int main(int argc, char *argv[]) {
         calibration.addCalibriteColorboard(make_vec3(0, 0.75, 0.001), 0.025);
 
         // Set camera
-        CameraSetup camera_setup = init_camera(sampled_params);
+        CameraSetup camera_setup = init_camera(context, UUIDs_plants, sampled_params);
         CameraProperties cam_prop = camera_setup.cam_prop;
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
@@ -714,8 +721,8 @@ int main(int argc, char *argv[]) {
         // set up sun lighting
         vis.setLightDirection(sphere2cart(sun_dir));
         vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-        vis.setCameraPosition(camera_position, camera_lookat); 
-        vis.setCameraFieldOfView(cam_prop.HFOV / cam_prop.FOV_aspect_ratio);
+        vis.setCameraPosition(camera_position, camera_lookat);
+        vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV,cam_prop.FOV_aspect_ratio));
         vis.plotUpdate(true);
         // Save the image to the file.
         std::string save_path = output_dir + "/" + filename + "_vis.jpeg";

@@ -165,4 +165,34 @@ void rescaleUUIDsToSize(helios::Context& context, const std::vector<uint>& UUIDs
     context.scalePrimitive(UUIDs, scale);
 }
 
+// Convert HFOV (degrees) to VFOV (degrees) given aspect ratio (width/height)
+float HFOVtoVFOV(float HFOV_deg, float aspect_ratio) {
+    if (aspect_ratio <= 0.0f) return HFOV_deg; // fallback
+    const float PI = 3.14159265358979323846f;
+    auto deg2rad = [&](float d){ return d * (PI/180.0f); };
+    auto rad2deg = [&](float r){ return r * (180.0f/PI); };
+
+    float hf_rad = deg2rad(HFOV_deg);
+    float tan_h2 = tanf(hf_rad * 0.5f);
+    float tan_v2 = tan_h2 / aspect_ratio;
+    float vf_rad = 2.0f * atanf(tan_v2);
+    return rad2deg(vf_rad);
+}
+
+// Convert HFOV (degrees) to diagonal FOV (degrees) given aspect ratio (width/height)
+float HFOVtoDFOV(float HFOV_deg, float aspect_ratio) {
+    if (aspect_ratio <= 0.0f) return HFOV_deg; // fallback
+    const float PI = 3.14159265358979323846f;
+    auto deg2rad = [&](float d){ return d * (PI/180.0f); };
+    auto rad2deg = [&](float r){ return r * (180.0f/PI); };
+
+    float hf_rad = deg2rad(HFOV_deg);
+    float tan_h2 = tanf(hf_rad * 0.5f);
+    // diagonal half-angle tangent = sqrt(tan_h2^2 + tan_v2^2)
+    float tan_v2 = tan_h2 / aspect_ratio;
+    float tan_d2 = sqrtf(tan_h2 * tan_h2 + tan_v2 * tan_v2);
+    float df_rad = 2.0f * atanf(tan_d2);
+    return rad2deg(df_rad);
+}
+
 
