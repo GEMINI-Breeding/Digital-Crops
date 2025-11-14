@@ -92,9 +92,9 @@ CameraSetup init_camera(Context& context, const std::vector<uint>& UUIDs_plants,
         cam_prop_json["camera_resolution_x"]["sampled"].get<int>(),
         cam_prop_json["camera_resolution_y"]["sampled"].get<int>());
 
-    setup.cam_prop.FOV_aspect_ratio =
-        float(setup.cam_prop.camera_resolution.x) /
-        float(setup.cam_prop.camera_resolution.y);
+    // setup.cam_prop.FOV_aspect_ratio =
+    //     float(setup.cam_prop.camera_resolution.x) /
+    //     float(setup.cam_prop.camera_resolution.y);
 
     // Calculate plant canopy center based on plant positions or default to origin
     vec3 canopy_center = make_vec3(0, 0, 0);
@@ -151,8 +151,7 @@ void init_radiation_model(Context &context,
                           LeafOptics& leafoptics,
                           const CameraSetup& camera_setup,
                           json sampled_params,
-                          std::vector<uint> UUIDs_ground,
-                          std::vector<uint> UUIDs_plants) {
+                          std::vector<uint> UUIDs_ground) {
 
     auto radiation_cfg = sampled_params["radiationmodel"];
     // load color and reflectivity data
@@ -178,76 +177,67 @@ void init_radiation_model(Context &context,
                            {"spectrum_purple", "spectrum_white"},
                            {0.10, 0.90}); // mostly white with purple tint
 
+    // prepare custom pod colors
+    radiation.blendSpectra("reflectivity_pod_cowpea",
+                           {"spectrum_yellow", "spectrum_green"}, {0.95, 0.05});
+
     DEBUG_PRINT();
 
-    // load color and reflectivity data
-    context.loadXML(sampled_params["radiationmodel"]["colorboard"]
-                        .get<std::string>().c_str(), true);
-    context.loadXML(
-        sampled_params["radiationmodel"]["leaf_surface_spectral_data"]["file"]
-            .get<std::string>().c_str(), true);
-    context.loadXML(
-        sampled_params["radiationmodel"]["soil_surface_spectral_data"]["file"]
-            .get<std::string>().c_str(), true);
-    context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
-    context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
-    context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
-    context.renameGlobalData("ColorReference_DGK_01", "spectrum_white");
-
-    // prepare custom flower colors
-    radiation.blendSpectra("reflectivity_flower_cowpea_closed",
-                           {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
-    radiation.blendSpectra("reflectivity_flower_cowpea_open",
-                           {"spectrum_purple", "spectrum_white"},
-                           {0.10, 0.90}); // mostly white with purple tint
-
-    // assign colors to each object
+    // Set default color for whole plant
+    std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
     context.setPrimitiveData(
         UUIDs_plants, "reflectivity_spectrum",
-        sampled_params["radiationmodel"]["leaf_surface_spectral_data"]
+        radiation_cfg["leaf_surface_spectral_data"]
                       ["reflectivity"]
                           .get<std::string>());
     context.setPrimitiveData(
         UUIDs_plants, "transmissivity_spectrum",
-        sampled_params["radiationmodel"]["leaf_surface_spectral_data"]
+        radiation_cfg["leaf_surface_spectral_data"]
                       ["transmissivity"]
                           .get<std::string>());
+
+    // Set default color for soil
     context.setPrimitiveData(
         UUIDs_ground, "reflectivity_spectrum",
-        sampled_params["radiationmodel"]["soil_surface_spectral_data"]
+        radiation_cfg["soil_surface_spectral_data"]
                       ["reflectivity"]
                           .get<std::string>());
+    // Make the ground plane single-sided (only visible from above)
+    context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
 
-    // set specular properties for realistic shading
+    // Specular reflection causes a surface to look "shiny"
     context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
     context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
 
-    // get unique labels for flowers and apply colors based on open/closed state
-    uint flower_counter = 0;
-    uint pod_counter = 0;
-    uint plant_counter = 0;
-
+    
     // Initialize leaf optics properties
     LeafOpticsProperties leafopticsprops;
     leafopticsprops.chlorophyllcontent =
         sampled_params["leafoptics"]["chlorophyll_content"]["sampled"]
             .get<int>();
+    
+    // Get plantarchitecture plant ids
+    std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
+    for (uint &id : plant_ids) {
 
-    for (uint &id : UUIDs_plants) {
-        std::vector<uint> IDs_flower =
+        // label plants
+        std::vector<uint> single_plant_UUIDs = plantarchitecture.getAllPlantObjectIDs(id);
+        std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(single_plant_UUIDs);
+        context.setPrimitiveData(uuids_plant, "plant", id);
+
+        // Get flower obj id in plantarchitecture
+        std::vector<uint> flower_obj_ids =
             plantarchitecture.getPlantFlowerObjectIDs(id);
-        std::vector<uint> IDs_pod =
-            plantarchitecture.getPlantFruitObjectIDs(id);
 
-        for (uint &id_flower : IDs_flower) {
+        for (uint &flower_obj_id : flower_obj_ids) {
             std::vector<uint> uuids_flower =
-                context.getObjectPrimitiveUUIDs(id_flower);
+                context.getObjectPrimitiveUUIDs(flower_obj_id);
 
             // check if flower is open or closed based on object data
-            if (context.doesObjectDataExist(id_flower, "closedflowerID")) {
+            if (context.doesObjectDataExist(flower_obj_id, "closedflowerID")) {
                 context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
                                          "reflectivity_flower_cowpea_closed");
-            } else if (context.doesObjectDataExist(id_flower, "openflowerID")) {
+            } else if (context.doesObjectDataExist(flower_obj_id, "openflowerID")) {
                 context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
                                          "reflectivity_flower_cowpea_open"); 
             } else {
@@ -257,31 +247,32 @@ void init_radiation_model(Context &context,
             }
             
             // label flowers
-            context.setPrimitiveData(uuids_flower, "flower", flower_counter);
-            flower_counter++;
+            context.setPrimitiveData(uuids_flower, "flower", flower_obj_id);
         }
 
-        // Optional: pod labeling (commented out like in
-        // syntheticdata_sample_test) for (uint& id_pod : IDs_pod) {
-        //     std::vector<uint> uuids_pod =
-        //     context.getObjectPrimitiveUUIDs(id_pod);
-        //     context.setPrimitiveData(uuids_pod, "pod", pod_counter);
-        //     pod_counter++;
-        // }
-
-        // label plants
-        std::vector<uint> IDs_plant = plantarchitecture.getAllPlantObjectIDs(id);
-        std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(IDs_plant);
-        context.setPrimitiveData(uuids_plant, "plant", id);
+        // Get pod obj id in plantarchitecture
+        std::vector<uint> pod_obj_ids =
+            plantarchitecture.getPlantFruitObjectIDs(id);
+        for (uint& pod_obj_id : pod_obj_ids) {
+            std::vector<uint> uuids_pod =
+            context.getObjectPrimitiveUUIDs(pod_obj_id);
+            // pod coloring
+            context.setPrimitiveData(uuids_pod, "reflectivity_spectrum",
+                                         "reflectivity_pod_cowpea"); 
+            // pod labeling
+            context.setPrimitiveData(uuids_pod, "pod", pod_obj_id);
+        }
 
         // Update leaf optical properties
-        std::vector<uint> IDs_leaf =
+        std::vector<uint> leaf_obj_ids =
             plantarchitecture.getPlantLeafObjectIDs(id);
-        for (uint &id_leaf : IDs_leaf) {
+        for (uint &leaf_obj_id : leaf_obj_ids) {
             std::vector<uint> uuids_leaf =
-                context.getObjectPrimitiveUUIDs(id_leaf);
+                context.getObjectPrimitiveUUIDs(leaf_obj_id);
             leafoptics.run(uuids_leaf, leafopticsprops, "cowpea_leaf");
+            context.setPrimitiveData(uuids_leaf, "specular_exponent", 30.f);
         }
+
     }
 
     // set up sun lighting
@@ -310,7 +301,7 @@ void init_radiation_model(Context &context,
     context.loadXML(
         "plugins/radiation/spectral_data/camera_spectral_library.xml", true);
     std::string camera_type =
-        sampled_params["radiationmodel"]["camera_spectral_data"]["camera_type"]
+        radiation_cfg["camera_spectral_data"]["camera_type"]
             .get<std::string>();
     radiation.setCameraSpectralResponse(cameralabel, "red",
                                         (camera_type + "_red").c_str());
@@ -345,7 +336,7 @@ struct CommandLineOptions {
     bool stats_only = false;
     bool gui = false;
     bool run_radiation = true;  // Run faster if running without radiation?
-    bool save_visualizer = false; // Skip visualizer image by default
+    bool run_visualizer = false; // Skip visualizer image by default
     bool calibrate_color = false; // Add color calibration panel and run auto-calibration
     float height = 1.0f;
     int days = 0;
@@ -391,7 +382,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --stats-only             Only output statistics\n"
                       << "  --gui                    Enable GUI interactive mode\n"
                       << "  --radiation true|false   Run radiation model (default: true)\n"
-                      << "  --visualizer true|false  Save visualizer image (default: true)\n"
+                      << "  --vis true|false  Save visualizer image (default: true)\n"
                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
                       << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
                       << "  -t, --tile FILE          Set tile file path\n"
@@ -415,14 +406,14 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 } else {
                     std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
                 }
-            } else if (arg == "--visualizer") {
+            } else if (arg == "--vis") {
                 std::string vis_flag = argv[++i];
                 if (vis_flag == "false" || vis_flag == "0") {
-                    options.save_visualizer = false;
+                    options.run_visualizer = false;
                 } else if (vis_flag == "true" || vis_flag == "1") {
-                    options.save_visualizer = true;
+                    options.run_visualizer = true;
                 } else {
-                    std::printf("Invalid value for --visualizer: %s (use true/false or 1/0)\n", vis_flag.c_str());
+                    std::printf("Invalid value for --vis: %s (use true/false or 1/0)\n", vis_flag.c_str());
                 }
             } else if (arg == "--calibrate-color") {
                 std::string cal_flag = argv[++i];
@@ -472,7 +463,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  stats_only: " << (options.stats_only ? "true" : "false") << std::endl;
         std::cout << "  gui: " << (options.gui ? "true" : "false") << std::endl;
         std::cout << "  run_radiation: " << (options.run_radiation ? "true" : "false") << std::endl;
-        std::cout << "  save_visualizer: " << (options.save_visualizer ? "true" : "false") << std::endl;
+        std::cout << "  run_visualizer: " << (options.run_visualizer ? "true" : "false") << std::endl;
         std::cout << "  calibrate_color: " << (options.calibrate_color ? "true" : "false") << std::endl;
         std::cout << "  height: " << options.height << std::endl;
         std::cout << "  days: " << options.days << std::endl;
@@ -619,14 +610,13 @@ int main(int argc, char *argv[]) {
                                          plot_plant_IDs.end());
                 }
             }
-            std::cout << "done " << std::endl;
+            
         } else if (mode == GenerationMode::MANUAL) {
             // Manual plot generation - Heesup
             int num_crops = 0;
             if (plot_cfg.contains("crops") && plot_cfg["crops"].is_array()) {
                 num_crops = plot_cfg["crops"].size();
             }
-            std::cout << "Number of crops: " << num_crops << std::endl;
 
             float bed_width = sampled_params["plots"]["bed_width"];
             float bed_length = sampled_params["plots"]["bed_length"];
@@ -664,6 +654,8 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
+        std::cout << "Number of crops: " << all_plant_IDs.size() << std::endl;
+
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
         if (sampled_params["ground"]["use_obj_ground"].get<bool>()) {
@@ -675,9 +667,9 @@ int main(int argc, char *argv[]) {
             float ground_x = sampled_params["ground"]["size_x"]["sampled"];
             float ground_y = sampled_params["ground"]["size_y"]["sampled"];
             helios::vec3 tile_center = make_vec3(0, 0, 0);
-            helios::vec2 tile_size = make_vec2(1, 1);
+            helios::vec2 tile_size = make_vec2(1.0, 1.0);
             helios::vec2 field_size = make_vec2(ground_x, ground_y);
-            int2 texture_repeat = make_int2(ground_x / tile_size.x, ground_y / tile_size.y);
+            int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
             UUIDs_ground = context.addTile(tile_center, field_size,
                                            make_SphericalCoord(0, 0),
                                            make_int2(1000, 1000), // Subdivision
@@ -734,7 +726,7 @@ int main(int argc, char *argv[]) {
         }
         
         // Render the visualizer image to file if enabled via CLI flag
-        if (args.save_visualizer) {
+        if (args.run_visualizer) {
             Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
             vis.clearGeometry();
             vis.buildContextGeometry(&context);
@@ -751,10 +743,50 @@ int main(int argc, char *argv[]) {
             vis.setCameraPosition(camera_position, camera_lookat);
             vis.setCameraFieldOfView(
                 HFOVtoVFOV(cam_prop.HFOV, cam_prop.FOV_aspect_ratio));
-            vis.plotUpdate(true);
+            vis.plotUpdate();
 
             std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
             vis.printWindow(save_path.c_str());
+
+            // // Generate annotations
+            // // Declare the Synthetic Annotation class.
+            // SyntheticAnnotation annotation(&context);
+            // annotation.setCameraPosition(camera_position, camera_lookat);
+            // annotation.disableInstanceSegmentation();
+            // annotation.enableObjectDetection();
+            // // annotation.setWindowSize(800, 800);
+
+            // annotation.labelPrimitives("plants");
+            // // // Add labels according to whatever scheme we want.
+            // for (int i = 0; i < UUIDs_plants.size(); i++) {
+            //     uint plantID = UUIDs_plants[i];
+            //     {
+            //     // loop over plants
+            //     std::vector<uint> IDs_plant = plantarchitecture.getAllPlantUUIDs(plantID);
+                
+            //     // annotation.labelPrimitives(plantarchitecture.getBranchUUIDs(plantID),
+            //     //                            "branches");
+            //     // annotation.labelPrimitives(plantarchitecture.getLeafUUIDs(plantID),
+            //     //                            "leaves");
+            //     // std::vector<std::vector<std::vector<uint>>> fruitUUIDs =
+            //     //     canopygenerator.getFruitUUIDs(p);
+            //     // if (fruitUUIDs.size() == 1) { // no clusters, only
+            //     //     individual fruit for (auto &fruit :
+            //     //     fruitUUIDs.front())
+            //     //         annotation.labelPrimitives(fruit, "clusters");
+            //     // } else if (fruitUUIDs.size() >
+            //     //            1) { // fruit contained within cluster - label
+            //     //            by
+            //     //     cluster for (auto &cluster : fruitUUIDs)
+            //     //         annotation.labelPrimitives(flatten(cluster),
+            //     //                                    "clusters");
+            //     // }
+            //     }
+            // }
+            // // Render the annotations.
+            // save_path = output_dir + "/" + filename + "/";
+            // std::cout << save_path;
+            // annotation.render(save_path.c_str());
 
             if (args.gui) {
                 // plotInteractive for GUI mode
@@ -767,50 +799,14 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // // Generate annotations
-        // // Declare the Synthetic Annotation class.
-        // SyntheticAnnotation annotation(&context);
-        // annotation.setCameraPosition(make_vec3(0, 0, 1), make_vec3(1, 0, 1));
-        // annotation.setCameraPosition(
-        //     make_vec3(0, 0, 5),
-        //     make_vec3(1, 0, 0)); // 왜 이렇게 해야하는지 잘 모르겠음
-        // annotation.disableInstanceSegmentation();
-        // // annotation.setWindowSize(800, 800);
 
-        // // Add labels according to whatever scheme we want.
-        // for (int i = 0; i < UUIDs_plants.size(); i++) {
-        //         uint plantID = UUIDs_plants[i];
-        //     // loop over plants
-        //     {
-        //         annotation.labelPrimitives(plantarchitecture.getAllPlantObjectIDs(plantID), "plants");
-        //         // annotation.labelPrimitives(plantarchitecture.getBranchUUIDs(plantID),
-        //         //                            "branches");
-        //         // annotation.labelPrimitives(plantarchitecture.getLeafUUIDs(plantID),
-        //         //                            "leaves");
-        //         // std::vector<std::vector<std::vector<uint>>> fruitUUIDs =
-        //         //     canopygenerator.getFruitUUIDs(p);
-        //         // if (fruitUUIDs.size() == 1) { // no clusters, only
-        //         //     individual fruit for (auto &fruit : fruitUUIDs.front())
-        //         //         annotation.labelPrimitives(fruit, "clusters");
-        //         // } else if (fruitUUIDs.size() >
-        //         //            1) { // fruit contained within cluster - label by
-        //         //     cluster for (auto &cluster : fruitUUIDs)
-        //         //         annotation.labelPrimitives(flatten(cluster),
-        //         //                                    "clusters");
-        //         // }
-        //     }
-        // }
-        // // Render the annotations.
-        // std::string this_image_dir = std::string("output/annotations");
-        // std::cout << this_image_dir;
-        // annotation.render(this_image_dir.c_str());
 
         // Run radiation model by default true
         if (args.run_radiation) {
             // Initialize the radiation model
             init_radiation_model(context, radiation, plantarchitecture,
                                  leafoptics, camera_setup, sampled_params,
-                                 UUIDs_ground, UUIDs_plants);
+                                 UUIDs_ground);
 
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
             std::string cameralabel = "camera";
@@ -850,13 +846,12 @@ int main(int argc, char *argv[]) {
     
 
             // Export bounding boxes and segmentation masks in COCO format
-            radiation.writeImageBoundingBoxes(cameralabel, {"flower", "plant"},
-                                              {0, 1}, image_file, "classes.txt",
+            radiation.writeImageBoundingBoxes(cameralabel, {"plant", "flower", "pod"},
+                                              {0, 1, 2}, image_file, "classes.txt",
                                               output_dir + '/');
 
             radiation.writeImageSegmentationMasks(
-                //cameralabel, {"flower", "plant"}, {0, 1},
-                cameralabel, {"plant"}, {0},
+                cameralabel, {"plant", "flower", "pod"}, {0, 1, 2},
                 output_dir + '/' + filename + "_labels.json", image_file);
 
             // auto-calibrate camera using colorboard reference values with
@@ -867,6 +862,10 @@ int main(int argc, char *argv[]) {
                     cameralabel, "red", "green", "blue",
                     output_dir + '/' + filename + ".jpeg", true);
             }
+
+            // Export camera parameters
+            // radiation.setCameraMetadata()
+            // radiation.writeCameraMetadataFile(cameralabel, output_dir + '/' + filename + "_camera.json");
         }
     }
 
