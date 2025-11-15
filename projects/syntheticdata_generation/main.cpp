@@ -270,7 +270,7 @@ void init_radiation_model(Context &context,
             std::vector<uint> uuids_leaf =
                 context.getObjectPrimitiveUUIDs(leaf_obj_id);
             leafoptics.run(uuids_leaf, leafopticsprops, "cowpea_leaf");
-            context.setPrimitiveData(uuids_leaf, "specular_exponent", 30.f);
+            context.setPrimitiveData(uuids_leaf, "specular_exponent", 10.f);
         }
 
     }
@@ -743,7 +743,7 @@ int main(int argc, char *argv[]) {
             vis.setCameraPosition(camera_position, camera_lookat);
             vis.setCameraFieldOfView(
                 HFOVtoVFOV(cam_prop.HFOV, cam_prop.FOV_aspect_ratio));
-            vis.plotUpdate();
+            vis.plotUpdate(true);
 
             std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
             vis.printWindow(save_path.c_str());

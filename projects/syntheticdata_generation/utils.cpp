@@ -127,8 +127,8 @@ void getBoundingBoxAndExtent(helios::Context& context, const std::vector<uint>& 
     // Iterate through each UUID and update min/max
     for (uint uuid : UUIDs) {
         vec3 min_c, max_c;
-        std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(uuid);
-        context.getPrimitiveBoundingBox(uuids_plant, min_c, max_c);
+        // std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(uuid);
+        context.getPrimitiveBoundingBox(uuid, min_c, max_c);
         min_x = std::min(min_x, min_c.x);
         min_y = std::min(min_y, min_c.y);
         min_z = std::min(min_z, min_c.z);
