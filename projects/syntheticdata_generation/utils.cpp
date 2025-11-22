@@ -30,6 +30,11 @@ void addSampledValues(json& j, std::mt19937& rng) {
     if (j.is_object()) {
         // Check if this object has a "sampling" key
         if (j.contains("sampling")) {
+            // Skip sampling if "sampled" key already exists
+            if (j.contains("sampled")) {
+                return;
+            }
+            
             std::string sampling = j["sampling"];
             
             // Determine the type and sample accordingly

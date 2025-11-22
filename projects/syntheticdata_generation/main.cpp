@@ -561,12 +561,13 @@ int main(int argc, char *argv[]) {
         sampled_params = sampleParams(json_params, rng);
 
         // save sampled parameters
-        std::ofstream params_file(output_dir + "/" + filename + "_params.json");
+        std::string params_filename = output_dir + "/" + filename + "_params.json";
+        std::ofstream params_file(params_filename);
         params_file << std::setw(4) << sampled_params << std::endl;
         params_file.close();
 
         // Create multiple plots in a grid pattern
-        std::vector<uint> all_plant_IDs;
+        std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
         auto plot_cfg = sampled_params["plots"];
         auto pa_init = sampled_params["plantarchitecture"]["initialize"];
         if (mode == GenerationMode::AUTO) {
@@ -604,8 +605,8 @@ int main(int argc, char *argv[]) {
                                       pa_init["plant_count"]["sampled"]),
                             0);
 
-                    // Add to the total collection
-                    all_plant_IDs.insert(all_plant_IDs.end(),
+                    // Add to the aging collection
+                    plant_IDs_aging.insert(plant_IDs_aging.end(),
                                          plot_plant_IDs.begin(),
                                          plot_plant_IDs.end());
                 }
@@ -642,11 +643,27 @@ int main(int argc, char *argv[]) {
                 origin.y = row * bed_length;
                 // float Z = config["crops"][i]["Z"].as<float>();
                 vec3 plant_origin = origin + make_vec3(X, Y, 0);
-                uint plantID = plantarchitecture.buildPlantInstanceFromLibrary(
-                    plant_origin, 0);
-                all_plant_IDs.push_back(plantID);
-                std::cout << "Generated plant (ID:" << plantID << ")"
-                          << std::endl;
+                
+
+
+                // Check if xml path is provided and valid
+                if (selected_crop.contains("xml") && 
+                    selected_crop["xml"].is_string() && 
+                    !selected_crop["xml"].get<std::string>().empty()) {
+                    // Build plant from XML file (already aged)
+                    std::string xml_path = selected_crop["xml"].get<std::string>();
+                    std::vector<uint> plot_plant_IDs;
+                    plot_plant_IDs = plantarchitecture.readPlantStructureXML(xml_path, 0);
+                    for(int i=0;i < plot_plant_IDs.size();i++) {
+                        std::cout << "Loaded plant from XML (ID:" << plot_plant_IDs[i] << "): " << xml_path << std::endl;
+                    }
+                } else {
+                    // Build plant from library (needs aging)
+                    uint plantID;
+                    plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, true);
+                    plant_IDs_aging.push_back(plantID);
+                    std::cout << "Generated plant from library (ID:" << plantID << ")" << std::endl;
+                }
             }
         } else {
             std::cout << "[WARN] plots mode is not defined or invalid!"
@@ -654,7 +671,8 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        std::cout << "Number of crops: " << all_plant_IDs.size() << std::endl;
+        std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
+        std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
 
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
@@ -677,13 +695,12 @@ int main(int argc, char *argv[]) {
                                            texture_repeat);
         }
 
-        std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
-        // Age all plants together after creation
-        if (!UUIDs_plants.empty()) {
+        // Age only plants that were built from library (not from XML)
+        if (!plant_IDs_aging.empty()) {
             float plant_age = static_cast<int>(pa_init["plant_age"]["sampled"]);
             if (plant_age > 0) {
-                plantarchitecture.advanceTime(UUIDs_plants, plant_age);
-                std::cout << "Advanced all plants to age: " << plant_age
+                plantarchitecture.advanceTime(plant_IDs_aging, plant_age);
+                std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << plant_age
                           << " days" << std::endl;
             }
         }
@@ -691,6 +708,9 @@ int main(int argc, char *argv[]) {
 
         // Write the plant structure to an XML file
         if (args.save_xml) {
+            // Track XML file paths to add to params
+            std::vector<std::string> xml_file_paths;
+            
             for (int i = 0; i < UUIDs_plants.size(); i++) {
                 uint plantID = UUIDs_plants[i];
                 // filename with zero-padded plant number
@@ -699,6 +719,71 @@ int main(int argc, char *argv[]) {
                 << std::setfill('0') << i << ".xml";
                 std::string xml_file_name = output_dir + "/" + filename_stream.str();
                 plantarchitecture.writePlantStructureXML(plantID, xml_file_name);
+                xml_file_paths.push_back(xml_file_name);  // Store relative path
+            }
+            
+            // Add XML file paths and plant locations to sampled_params and re-save
+            if (!xml_file_paths.empty()) {
+                if (mode == GenerationMode::MANUAL && sampled_params["plots"].contains("crops") && 
+                    sampled_params["plots"]["crops"].is_array()) {
+                    // For manual mode, add xml path to each crop
+                    for (size_t j = 0; j < xml_file_paths.size() && j < sampled_params["plots"]["crops"].size(); j++) {
+                        sampled_params["plots"]["crops"][j]["xml"] = xml_file_paths[j];
+                    }
+                } else if (mode == GenerationMode::AUTO) {
+                    // For auto mode, create crops array with position and XML data
+                    json crops_array = json::array();
+                    
+                    // Get grid parameters used during generation
+                    int num_beds = plot_cfg["num_beds"]["sampled"].get<int>();
+                    int num_rows = plot_cfg["num_rows"]["sampled"].get<int>();
+                    float bed_spacing_x = plot_cfg["bed_spacing_x"]["sampled"].get<float>();
+                    float bed_spacing_y = plot_cfg["bed_spacing_y"]["sampled"].get<float>();
+                    float total_bed_width = (num_beds - 1) * bed_spacing_x;
+                    float total_bed_height = (num_rows - 1) * bed_spacing_y;
+                    float start_x = -total_bed_width / 2.0f;
+                    float start_y = -total_bed_height / 2.0f;
+                    
+                    for (size_t j = 0; j < xml_file_paths.size() && j < UUIDs_plants.size(); j++) {
+                        uint plantID = UUIDs_plants[j];
+                        vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
+                        
+                        // Calculate which bed and row this plant belongs to based on its position
+                        // The plot center positions were: plot_x = start_x + bed * bed_spacing_x
+                        //                                plot_y = start_y + row * bed_spacing_y
+                        int bed = static_cast<int>(std::round((plant_position.x - start_x) / bed_spacing_x));
+                        int row = static_cast<int>(std::round((plant_position.y - start_y) / bed_spacing_y));
+                        
+                        // Calculate the plot center for this bed/row
+                        float plot_center_x = start_x + bed * bed_spacing_x;
+                        float plot_center_y = start_y + row * bed_spacing_y;
+                        
+                        // Calculate position relative to plot center
+                        float x_relative = plant_position.x - plot_center_x;
+                        float y_relative = plant_position.y - plot_center_y;
+                        
+                        json crop_info;
+                        crop_info["crop_type"] = sampled_params["plant"];
+                        crop_info["bed"] = bed;
+                        crop_info["row"] = row;
+                        crop_info["x"] = x_relative;
+                        crop_info["y"] = y_relative;
+                        crop_info["xml"] = xml_file_paths[j];
+                        
+                        crops_array.push_back(crop_info);
+                    }
+                    
+                    sampled_params["plots"]["crops"] = crops_array;
+                } else {
+                    // Fallback: add as a top-level array
+                    sampled_params["xml_files"] = xml_file_paths;
+                }
+                
+                // Re-save the params file with XML paths
+                std::ofstream params_file_update(params_filename);
+                params_file_update << std::setw(4) << sampled_params << std::endl;
+                params_file_update.close();
+                std::cout << "Updated parameters file with XML paths: " << params_filename << std::endl;
             }
         }
 
