@@ -72,7 +72,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
 }
 
-CameraSetup init_camera(Context& context, const std::vector<uint>& UUIDs_plants, json sampled_params) {
+CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, json sampled_params) {
     CameraSetup setup;
     
     // camera params
@@ -95,12 +95,33 @@ CameraSetup init_camera(Context& context, const std::vector<uint>& UUIDs_plants,
     // setup.cam_prop.FOV_aspect_ratio =
     //     float(setup.cam_prop.camera_resolution.x) /
     //     float(setup.cam_prop.camera_resolution.y);
-
-    // Calculate plant canopy center based on plant positions or default to origin
+    // Calculate plant canopy center based on plant base positions or default to origin
     vec3 canopy_center = make_vec3(0, 0, 0);
-    if (!UUIDs_plants.empty() && cam_prop_json["camera_positioning"]["center_plants"]) {
-        vec3 min_corner, max_corner, extent;
-        getBoundingBoxAndExtent(context, UUIDs_plants, min_corner, max_corner, extent);
+    if (cam_prop_json["camera_positioning"]["center_plants"]) {
+        // Get bounding box from plant base positions for more accurate centering
+        vec3 min_corner = make_vec3(std::numeric_limits<float>::max(), 
+                                    std::numeric_limits<float>::max(), 
+                                    std::numeric_limits<float>::max());
+        vec3 max_corner = make_vec3(std::numeric_limits<float>::lowest(), 
+                                    std::numeric_limits<float>::lowest(), 
+                                    std::numeric_limits<float>::lowest());
+        
+        // Iterate through all plants and get their base positions
+        std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
+        for (uint plantID : plant_ids) {
+            vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
+            
+            // Update bounding box
+            min_corner.x = std::min(min_corner.x, plant_position.x);
+            min_corner.y = std::min(min_corner.y, plant_position.y);
+            min_corner.z = std::min(min_corner.z, plant_position.z);
+            
+            max_corner.x = std::max(max_corner.x, plant_position.x);
+            max_corner.y = std::max(max_corner.y, plant_position.y);
+            max_corner.z = std::max(max_corner.z, plant_position.z);
+        }
+        
+        // Calculate center from bounding box
         canopy_center = (min_corner + max_corner) * 0.5f;
     }
 
@@ -153,6 +174,7 @@ void init_radiation_model(Context &context,
                           json sampled_params,
                           std::vector<uint> UUIDs_ground) {
 
+    if (g_debug_mode) std::cout << "[DEBUG] Loading radiation XML files..." << std::endl;
     auto radiation_cfg = sampled_params["radiationmodel"];
     // load color and reflectivity data
     context.loadXML(radiation_cfg["colorboard"].get<std::string>().c_str(),
@@ -169,6 +191,7 @@ void init_radiation_model(Context &context,
     context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
     context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
     context.renameGlobalData("ColorReference_DGK_01", "spectrum_white");
+    if (g_debug_mode) std::cout << "[DEBUG] Preparing spectral blends..." << std::endl;
 
     // prepare custom flower colors
     radiation.blendSpectra("reflectivity_flower_cowpea_closed",
@@ -183,6 +206,7 @@ void init_radiation_model(Context &context,
 
     DEBUG_PRINT();
 
+    if (g_debug_mode) std::cout << "[DEBUG] Setting plant spectral properties..." << std::endl;
     // Set default color for whole plant
     std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
     context.setPrimitiveData(
@@ -216,6 +240,7 @@ void init_radiation_model(Context &context,
         sampled_params["leafoptics"]["chlorophyll_content"]["sampled"]
             .get<int>();
     
+    if (g_debug_mode) std::cout << "[DEBUG] Processing individual plants..." << std::endl;
     // Get plantarchitecture plant ids
     std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
     for (uint &id : plant_ids) {
@@ -275,6 +300,7 @@ void init_radiation_model(Context &context,
 
     }
 
+    if (g_debug_mode) std::cout << "[DEBUG] Adding sun and radiation bands..." << std::endl;
     // set up sun lighting
     uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
     radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
@@ -293,6 +319,7 @@ void init_radiation_model(Context &context,
 
     std::string cameralabel = "camera";    
 
+    if (g_debug_mode) std::cout << "[DEBUG] Adding radiation camera..." << std::endl;
     // add the camera to the radiation model
     radiation.addRadiationCamera(cameralabel, bandlabels, camera_setup.camera_position,
                                  camera_setup.camera_lookat, camera_setup.cam_prop, 100);
@@ -310,6 +337,7 @@ void init_radiation_model(Context &context,
     radiation.setCameraSpectralResponse(cameralabel, "blue",
                                         (camera_type + "_blue").c_str());
 
+    if (g_debug_mode) std::cout << "[DEBUG] Radiation model initialization complete." << std::endl;
     return;
 }
 
@@ -479,6 +507,56 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
     return options;
 }
 
+#define CUDA_CHECK_ERROR() { \
+    optix::cudaError_t err = optix::cudaGetLastError(); \
+    if (err != optix::cudaSuccess) { \
+        std::cerr << "CUDA Error: " << optix::cudaGetErrorString(err) \
+                  << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+        exit(EXIT_FAILURE); \
+    } \
+}
+
+// System RAM monitoring function
+inline void printSystemMemoryUsage(const std::string& label = "") {
+    if (!g_debug_mode) return;
+    
+    std::ifstream status_file("/proc/self/status");
+    std::string line;
+    size_t vmrss = 0, vmsize = 0, vmpeak = 0, vmhwm = 0;
+    
+    while (std::getline(status_file, line)) {
+        if (line.find("VmRSS:") == 0) {
+            sscanf(line.c_str(), "VmRSS: %zu", &vmrss);
+        } else if (line.find("VmSize:") == 0) {
+            sscanf(line.c_str(), "VmSize: %zu", &vmsize);
+        } else if (line.find("VmPeak:") == 0) {
+            sscanf(line.c_str(), "VmPeak: %zu", &vmpeak);
+        } else if (line.find("VmHWM:") == 0) {
+            sscanf(line.c_str(), "VmHWM: %zu", &vmhwm);
+        }
+    }
+    
+    std::cout << "[DEBUG][System RAM" << (label.empty() ? "" : " - " + label) << "] "
+              << "Current RSS: " << vmrss / 1024 << " MB, "
+              << "Peak RSS: " << vmhwm / 1024 << " MB, "
+              << "Peak VmSize: " << vmpeak / 1024 << " MB" << std::endl;
+}
+
+// GPU memory monitoring function
+inline void printGPUMemoryUsage(const std::string& label = "") {
+    if (!g_debug_mode) return;
+    
+    size_t free_mem, total_mem;
+    optix::cudaMemGetInfo(&free_mem, &total_mem);
+    size_t used_mem = total_mem - free_mem;
+    
+    std::cout << "[DEBUG][GPU Memory" << (label.empty() ? "" : " - " + label) << "] "
+              << "Used: " << used_mem / (1024*1024) << " MB, "
+              << "Free: " << free_mem / (1024*1024) << " MB, "
+              << "Total: " << total_mem / (1024*1024) << " MB"
+              << " (" << (used_mem * 100 / total_mem) << "% used)" << std::endl;
+}
+
 int main(int argc, char *argv[]) {
 
     // Parse command-line arguments using dedicated function
@@ -493,7 +571,7 @@ int main(int argc, char *argv[]) {
     if (args.params_file.size() > 0) {
         params_file = args.params_file;
     } else {
-        params_file = "../params.json";
+        params_file = "drone_output/plot_21_3_0000_params.json";
     }
     std::cout << "Loading " << params_file << std::endl;
     json json_params = loadParametersFromJson(params_file);
@@ -673,6 +751,8 @@ int main(int argc, char *argv[]) {
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
+        printSystemMemoryUsage("After loading plants");
+        printGPUMemoryUsage("After loading plants");
 
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
@@ -680,6 +760,8 @@ int main(int argc, char *argv[]) {
             //UUIDs_ground = createObjGround(context, sampled_params);
             UUIDs_ground = make_field(context, sampled_params);
             DEBUG_PRINT("OBJ ground created");
+            printSystemMemoryUsage("After creating OBJ ground");
+            printGPUMemoryUsage("After creating OBJ ground");
         } else {
             // load dirt texture with fixed size (original method)
             float ground_x = sampled_params["ground"]["size_x"]["sampled"];
@@ -795,7 +877,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Set camera
-        CameraSetup camera_setup = init_camera(context, UUIDs_plants, sampled_params);
+        CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
         CameraProperties cam_prop = camera_setup.cam_prop;
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
@@ -811,13 +893,13 @@ int main(int argc, char *argv[]) {
         }
         
         // Render the visualizer image to file if enabled via CLI flag
-        if (args.run_visualizer) {
+        if (args.run_visualizer || args.gui) {
+            printGPUMemoryUsage("Before visualizer init");
             Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
             vis.clearGeometry();
-            vis.buildContextGeometry(&context);
             vis.hideWatermark();
-            vis.disableMessages();
-
+            //vis.disableMessages();
+            
             // set up sun lighting
             vis.setLightDirection(sphere2cart(sun_dir));
             if (sampled_params["sun_position"].value("shadow", true)) {
@@ -828,7 +910,8 @@ int main(int argc, char *argv[]) {
             vis.setCameraPosition(camera_position, camera_lookat);
             vis.setCameraFieldOfView(
                 HFOVtoVFOV(cam_prop.HFOV, cam_prop.FOV_aspect_ratio));
-            vis.plotUpdate(true);
+                // vis.plotUpdate(true);
+            vis.buildContextGeometry(&context);
 
             std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
             vis.printWindow(save_path.c_str());
@@ -888,18 +971,30 @@ int main(int argc, char *argv[]) {
 
         // Run radiation model by default true
         if (args.run_radiation) {
+            printSystemMemoryUsage("Before radiation init");
+            printGPUMemoryUsage("Before radiation init");
+            if (g_debug_mode) std::cout << "[DEBUG] Initializing radiation model..." << std::endl;
             // Initialize the radiation model
             init_radiation_model(context, radiation, plantarchitecture,
                                  leafoptics, camera_setup, sampled_params,
                                  UUIDs_ground);
+            printSystemMemoryUsage("After radiation init");
+            printGPUMemoryUsage("After radiation init");
 
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
             std::string cameralabel = "camera";
 
             // update geometry and run radiation model
+            if (g_debug_mode) std::cout << "[DEBUG] Updating radiation geometry..." << std::endl;
             radiation.updateGeometry();
+            printSystemMemoryUsage("After updateGeometry");
+            printGPUMemoryUsage("After updateGeometry");
+            printGPUMemoryUsage("After updateGeometry");
+            CUDA_CHECK_ERROR();
 
+            if (g_debug_mode) std::cout << "[DEBUG] Running radiation bands..." << std::endl;
             radiation.runBand(bandlabels);
+            printGPUMemoryUsage("After runBand");
 
             // process image using standard pipeline
             radiation.applyImageProcessingPipeline(cameralabel, "red", "green",
