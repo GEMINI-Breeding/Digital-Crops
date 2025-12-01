@@ -767,12 +767,56 @@ int main(int argc, char *argv[]) {
             float ground_x = sampled_params["ground"]["size_x"]["sampled"];
             float ground_y = sampled_params["ground"]["size_y"]["sampled"];
             helios::vec3 tile_center = make_vec3(0, 0, 0);
-            helios::vec2 tile_size = make_vec2(1.0, 1.0);
+            helios::vec2 tile_size = make_vec2(0.1, 0.1);
             helios::vec2 field_size = make_vec2(ground_x, ground_y);
+            
+            // Calculate pixel size on ground based on camera FOV and resolution from params
+            float camera_height = sampled_params["cameraproperties"]["camera_height"]["sampled"].get<float>();
+            float HFOV = sampled_params["cameraproperties"]["HFOV"]["sampled"].get<float>();
+            int camera_res_x = sampled_params["cameraproperties"]["camera_resolution_x"]["sampled"].get<int>();
+            int camera_res_y = sampled_params["cameraproperties"]["camera_resolution_y"]["sampled"].get<int>();
+            
+            float HFOV_rad = deg2rad(HFOV);
+            float VFOV_rad = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
+            
+            // Ground coverage in each dimension
+            float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
+            float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
+            
+            // Pixel size on ground
+            float pixel_size_x = ground_width_visible / camera_res_x;
+            float pixel_size_y = ground_height_visible / camera_res_y;
+            float pixel_size = std::max(pixel_size_x, pixel_size_y);
+            
+            // Set patch size to be smaller than pixel size (half pixel for good sampling)
+            float desired_patch_size = pixel_size * 0.5f;
+            int subdiv_x = std::max(100, (int)(ground_x / desired_patch_size));
+            int subdiv_y = std::max(100, (int)(ground_y / desired_patch_size));
+
+            // Prevent exceeding texture resolution constraints by clamping subdivisions
+            // Many bundled textures are ~1024x1024; large subdivision counts can trigger errors.
+            const int MAX_SUBDIV_PER_AXIS = 512; // conservative cap to avoid Context::addTile errors
+            int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
+            int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
+
+            if (g_debug_mode) {
+                std::cout << "[DEBUG] Ground tile subdivision calculation:" << std::endl;
+                std::cout << "  Camera height: " << camera_height << " m" << std::endl;
+                std::cout << "  Ground visible: " << ground_width_visible << " x " << ground_height_visible << " m" << std::endl;
+                std::cout << "  Pixel size on ground: " << pixel_size << " m" << std::endl;
+                std::cout << "  Desired patch size: " << desired_patch_size << " m" << std::endl;
+                std::cout << "  Subdivision (raw): " << subdiv_x << " x " << subdiv_y << std::endl;
+                if (subdiv_x != clamped_subdiv_x || subdiv_y != clamped_subdiv_y) {
+                    std::cout << "  Subdivision (clamped): " << clamped_subdiv_x << " x " << clamped_subdiv_y << std::endl;
+                }
+            }
+
+            // Keep texture repeat tied to visual tiling
             int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
+
             UUIDs_ground = context.addTile(tile_center, field_size,
                                            make_SphericalCoord(0, 0),
-                                           make_int2(1000, 1000), // Subdivision
+                                           make_int2(clamped_subdiv_x, clamped_subdiv_y),
                                            "plugins/visualizer/textures/dirt.jpg",
                                            texture_repeat);
         }

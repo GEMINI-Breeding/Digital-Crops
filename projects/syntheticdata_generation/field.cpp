@@ -28,8 +28,11 @@ std::vector<uint> plant_crops(CanopyGenerator &canopygenerator, Context &context
         vec3 origin(0, 0, 0);
         float X = config["crops"][i]["x"].as<float>();
         float Y = config["crops"][i]["y"].as<float>();
-        // float Z = config["crops"][i]["Z"].as<float>();
-        vec3 plant_origin = origin + make_vec3(X, Y, 0);
+        float Z = 0.0f;
+        if (config["crops"][i]["z"]) {
+            Z = config["crops"][i]["z"].as<float>();
+        }
+        vec3 plant_origin = origin + make_vec3(X, Y, Z);
 
         //printf(config["crops"][i]["crop_type"].as<std::string>().c_str());
         // std::cout << config["crops"][i]["crop_type"] << std::endl;
@@ -134,9 +137,21 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), config["bed_height"], nullrotation, RGB::white);
 
-    // Rescale the loaded OBJ to match bed dimensions (width, length, height)
+    // Rescale only X and Y to match bed dimensions, preserve Z from DEM
+    // The OBJ file already has correct Z values (elevations) normalized to plant locations
     vec3 bed_extent = make_vec3(config["bed_width"].get<float>(), config["bed_length"].get<float>(), config["bed_height"].get<float>());
     rescaleUUIDsToSize(context, UUIDs, bed_extent);
+    
+    // Apply plot heading rotation if specified
+    if (config.contains("plot_heading")) {
+        float plot_heading_deg = config["plot_heading"]["value"].get<float>();
+        if (plot_heading_deg != 0.0f) {
+            // Convert degrees to radians and rotate around Z-axis
+            float plot_heading_rad = plot_heading_deg * M_PI / 180.0f;
+            context.rotatePrimitive(UUIDs, plot_heading_rad, "z");
+            std::cout << "Rotated ground mesh by " << plot_heading_deg << " degrees" << std::endl;
+        }
+    }
 
     // Compute bounding box for the original OBJ once, since it's the same for all copies
     helios::vec3 min_corner, max_corner, extent;
