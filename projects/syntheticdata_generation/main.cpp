@@ -134,16 +134,14 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
                                 // towards zero when azimuth_angle=0
 
     // Calculate camera position based on plant canopy center
-    setup.camera_position.x = canopy_center.x +
-                        cam_prop_json["camera_positioning"]
+    float dist = cam_prop_json["camera_positioning"]
                                       ["distance_from_center"]["sampled"]
-                                          .get<float>() *
-                            cos(azimuth_rad);
-    setup.camera_position.y = canopy_center.y +
-                        cam_prop_json["camera_positioning"]
-                                      ["distance_from_center"]["sampled"]
-                                          .get<float>() *
-                            sin(azimuth_rad);
+                                          .get<float>();
+    
+    // Camear rotation starts at -pi / 2 to see y axis up when rad = 0
+    // cos(theta - pi/2) = sin(theta), sin(theta - pi/2) = -cos(theta)
+    setup.camera_position.x = canopy_center.x + dist*sin(azimuth_rad); 
+    setup.camera_position.y = canopy_center.y - dist*cos(azimuth_rad);
     setup.camera_position.z =
         cam_prop_json["camera_height"]["sampled"]
             .get<float>();
@@ -315,7 +313,7 @@ void init_radiation_model(Context &context,
     radiation.copyRadiationBand("red", "blue");
 
     std::vector<std::string> bandlabels = {"red", "green", "blue"};
-    radiation.setDiffuseSpectrum(bandlabels, "solar_spectrum_diffuse_ASTMG173");
+    radiation.setDiffuseSpectrum("solar_spectrum_diffuse_ASTMG173");
 
     std::string cameralabel = "camera";    
 
@@ -364,7 +362,7 @@ struct CommandLineOptions {
     bool stats_only = false;
     bool gui = false;
     bool run_radiation = true;  // Run faster if running without radiation?
-    bool run_visualizer = false; // Skip visualizer image by default
+    bool vis = false; // Skip visualizer image by default
     bool calibrate_color = false; // Add color calibration panel and run auto-calibration
     float height = 1.0f;
     int days = 0;
@@ -372,7 +370,6 @@ struct CommandLineOptions {
     int start_iteration = 0;
     std::string tile_file;
     std::string output_dir;
-    std::string plant_model_file;
     std::string output_name;
     std::string params_file;
 };
@@ -397,6 +394,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.save_xml = true;
         } else if (arg == "--stats-only") {
             options.stats_only = true;
+        } else if (arg == "--vis") {
+            options.vis = true;
         } else if (arg == "--gui") {
             options.gui = true;
         } else if (arg == "--help") {
@@ -410,12 +409,12 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --stats-only             Only output statistics\n"
                       << "  --gui                    Enable GUI interactive mode\n"
                       << "  --radiation true|false   Run radiation model (default: true)\n"
-                      << "  --vis true|false  Save visualizer image (default: true)\n"
+                      << "  --vis                    Save visualizer image (default: true)\n"
                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
                       << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
                       << "  -t, --tile FILE          Set tile file path\n"
                       << "  -o, --output DIR         Set output directory (default: from params.json)\n"
-                      << "  -f, --file FILE          Set plant model file\n"
+                      << "  -f, --file FILE          Set plant param file\n"
                       << "  --days N                 Set number of days (default: 0)\n"
                       << "  -s, --seed N             Set random seed (default: random)\n"
                       << "  -n, --name NAME          Set output name (default: 'plot')\n"
@@ -434,15 +433,6 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 } else {
                     std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
                 }
-            } else if (arg == "--vis") {
-                std::string vis_flag = argv[++i];
-                if (vis_flag == "false" || vis_flag == "0") {
-                    options.run_visualizer = false;
-                } else if (vis_flag == "true" || vis_flag == "1") {
-                    options.run_visualizer = true;
-                } else {
-                    std::printf("Invalid value for --vis: %s (use true/false or 1/0)\n", vis_flag.c_str());
-                }
             } else if (arg == "--calibrate-color") {
                 std::string cal_flag = argv[++i];
                 if (cal_flag == "false" || cal_flag == "0") {
@@ -460,8 +450,6 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.output_dir = argv[++i];
             } else if (arg == "-n" || arg == "--name") {
                 options.output_name = argv[++i];
-            } else if (arg == "-f" || arg == "--file") {
-                options.plant_model_file = argv[++i];
             } else if (arg == "--days") {
                 options.days = std::stoi(argv[++i]);
             } else if (arg == "-s" || arg == "--seed") {
@@ -469,7 +457,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 std::printf("Seed: %u\n", options.seed);
             } else if (arg == "-i" || arg == "--iteration") {
                 options.start_iteration = std::max(std::atoi(argv[++i]), 0);
-            } else if (arg == "-p" || arg == "--params") {
+            } else if (arg == "-f" || arg == "--file") {
                 options.params_file = argv[++i];
             } else {
                 std::printf("Unknown argument: %s\n", arg.c_str());
@@ -491,7 +479,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  stats_only: " << (options.stats_only ? "true" : "false") << std::endl;
         std::cout << "  gui: " << (options.gui ? "true" : "false") << std::endl;
         std::cout << "  run_radiation: " << (options.run_radiation ? "true" : "false") << std::endl;
-        std::cout << "  run_visualizer: " << (options.run_visualizer ? "true" : "false") << std::endl;
+        std::cout << "  vis: " << (options.vis ? "true" : "false") << std::endl;
         std::cout << "  calibrate_color: " << (options.calibrate_color ? "true" : "false") << std::endl;
         std::cout << "  height: " << options.height << std::endl;
         std::cout << "  days: " << options.days << std::endl;
@@ -499,7 +487,6 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  start_iteration: " << options.start_iteration << std::endl;
         std::cout << "  tile_file: '" << options.tile_file << "'" << std::endl;
         std::cout << "  output_dir: '" << options.output_dir << "'" << std::endl;
-        std::cout << "  plant_model_file: '" << options.plant_model_file << "'" << std::endl;
         std::cout << "  output_name: '" << options.output_name << "'" << std::endl;
         std::cout << "  params_file: '" << options.params_file << "'" << std::endl;
     }
@@ -763,12 +750,6 @@ int main(int argc, char *argv[]) {
             printSystemMemoryUsage("After creating OBJ ground");
             printGPUMemoryUsage("After creating OBJ ground");
         } else {
-            // load dirt texture with fixed size (original method)
-            float ground_x = sampled_params["ground"]["size_x"]["sampled"];
-            float ground_y = sampled_params["ground"]["size_y"]["sampled"];
-            helios::vec3 tile_center = make_vec3(0, 0, 0);
-            helios::vec2 tile_size = make_vec2(0.1, 0.1);
-            helios::vec2 field_size = make_vec2(ground_x, ground_y);
             
             // Calculate pixel size on ground based on camera FOV and resolution from params
             float camera_height = sampled_params["cameraproperties"]["camera_height"]["sampled"].get<float>();
@@ -777,12 +758,22 @@ int main(int argc, char *argv[]) {
             int camera_res_y = sampled_params["cameraproperties"]["camera_resolution_y"]["sampled"].get<int>();
             
             float HFOV_rad = deg2rad(HFOV);
-            float VFOV_rad = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
+            float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
+            float VFOV_rad = deg2rad(VFOV);
             
             // Ground coverage in each dimension
             float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
             float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
             
+            // load dirt texture with fixed size (original method)
+            //float ground_x = sampled_params["ground"]["size_x"]["sampled"];
+            //float ground_y = sampled_params["ground"]["size_y"]["sampled"];
+            float ground_x = ground_width_visible;
+            float ground_y = ground_height_visible;
+            helios::vec3 tile_center = make_vec3(0, 0, 0);
+            helios::vec2 tile_size = make_vec2(0.1, 0.1);
+            helios::vec2 field_size = make_vec2(ground_x, ground_y);
+
             // Pixel size on ground
             float pixel_size_x = ground_width_visible / camera_res_x;
             float pixel_size_y = ground_height_visible / camera_res_y;
@@ -799,7 +790,7 @@ int main(int argc, char *argv[]) {
             int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
             int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
 
-            if (g_debug_mode) {
+            if (g_debug_mode || true) {
                 std::cout << "[DEBUG] Ground tile subdivision calculation:" << std::endl;
                 std::cout << "  Camera height: " << camera_height << " m" << std::endl;
                 std::cout << "  Ground visible: " << ground_width_visible << " x " << ground_height_visible << " m" << std::endl;
@@ -937,7 +928,7 @@ int main(int argc, char *argv[]) {
         }
         
         // Render the visualizer image to file if enabled via CLI flag
-        if (args.run_visualizer || args.gui) {
+        if (args.vis || args.gui) {
             printGPUMemoryUsage("Before visualizer init");
             Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
             vis.clearGeometry();
@@ -952,9 +943,10 @@ int main(int argc, char *argv[]) {
                 vis.setLightingModel(Visualizer::LIGHTING_PHONG);
             }
             vis.setCameraPosition(camera_position, camera_lookat);
+            float FOV_aspect_ratio = cam_prop.camera_resolution.x / float(cam_prop.camera_resolution.y);
             vis.setCameraFieldOfView(
-                HFOVtoVFOV(cam_prop.HFOV, cam_prop.FOV_aspect_ratio));
-                // vis.plotUpdate(true);
+                HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
+            //vis.plotUpdate(true);
             vis.buildContextGeometry(&context);
 
             std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
