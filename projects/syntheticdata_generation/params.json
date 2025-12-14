@@ -103,7 +103,7 @@
     "camera_height": { "sampling": "uniform", "min": 1.5, "max": 1.5 },
     "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
     "lens_diameter": { "sampling": "constant", "value": 0.0028 },
-    "HFOV": { "sampling": "constant", "value": 108.0 },
+    "HFOV": { "sampling": "constant", "value": 120.0 },
     "camera_resolution_x": { "sampling": "constant", "value": 1920 },
     "camera_resolution_y": { "sampling": "constant", "value": 1080 },
 
