@@ -2,7 +2,7 @@
 if ( WIN32 )
     cmake_minimum_required(VERSION 3.15)
 else()
-    cmake_minimum_required(VERSION 2.5)
+    cmake_minimum_required(VERSION 3.15)
 endif()
 
 project(helios)
@@ -39,4 +39,4 @@ set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition;plant
 #-------- DO NOT MODIFY ---------#
 include( "${BASE_DIRECTORY}/core/CMake_project.txt" )
 
-target_link_libraries(main "yaml-cpp")
+target_link_libraries(main PRIVATE "yaml-cpp")

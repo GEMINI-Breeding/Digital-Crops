@@ -1,17 +1,20 @@
-name: .env
+name: digital-crops
 channels:
+  - pytorch
   - conda-forge
+  - bioconda
 dependencies:
-  - python=3.12
+  - python=3.10
   - geopandas
   - matplotlib
   - numpy
   - opencv
   - pandas
   - pytorch
-  - tqdm
   - torchaudio
   - torchvision
+  - tqdm
   - ipykernel
   - make
-  - cmake
+  - cmake 
+prefix: /home/lion397/.conda/envs/digital-crops
