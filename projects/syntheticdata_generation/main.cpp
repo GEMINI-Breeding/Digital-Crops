@@ -628,7 +628,7 @@ int main(int argc, char *argv[]) {
         // save sampled parameters
         std::string params_filename = output_dir + "/" + filename + "_params.json";
         std::ofstream params_file(params_filename);
-        params_file << std::setw(4) << sampled_params << std::endl;
+        params_file << std::scientific << std::setprecision(4) << sampled_params << std::endl;
         params_file.close();
 
         // Create multiple plots in a grid pattern
