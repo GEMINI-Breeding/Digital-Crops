@@ -41,7 +41,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
     // Load plant from Helios Library
     plantarchitecture.loadPlantModelFromLibrary(sampled_params["field"]["plant_type"]);
-
+    plantarchitecture.disableMessages();
     // Get the shoot parameters
     std::map<std::string, ShootParameters> shoot_params =
         plantarchitecture.getCurrentShootParameters();
@@ -166,37 +166,27 @@ void update_leafoptics(Context &context,
                         LeafOptics& leafoptics,
                         json sampled_params) {
     
-    // Initialize leaf optics properties with fitted parameters
-    LeafOpticsProperties leafopticsprops;
-    leafoptics.getPropertiesFromLibrary("cowpea", leafopticsprops);
-    leafopticsprops.numberlayers = sampled_params["leafoptics"].value("number_layers", 1.5824);
-    leafopticsprops.chlorophyllcontent = sampled_params["leafoptics"].value("chlorophyll_content", 37.4129);
-    leafopticsprops.carotenoidcontent = sampled_params["leafoptics"].value("carotenoid_content", 12.2658);
-    leafopticsprops.anthocyancontent = sampled_params["leafoptics"].value("anthocyan_content", 0.958622);
-    leafopticsprops.brownpigments = sampled_params["leafoptics"].value("brown_pigments", 0.01339);
-    leafopticsprops.watermass = sampled_params["leafoptics"].value("water_mass", 0.01346);
-    leafopticsprops.drymass = sampled_params["leafoptics"].value("dry_mass", 0.00315556);
-    leafopticsprops.protein = sampled_params["leafoptics"].value("protein", 0.0);
-    leafopticsprops.carbonconstituents = sampled_params["leafoptics"].value("carbon_constituents", 0.0);
-
-
-    // Run PROSPECT model to generate leaf_reflectivity_prospect and leaf_transmissivity_prospect
-    leafoptics.run(leafopticsprops, "cowpea");
-
-    if (g_debug_mode) std::cout << "[DEBUG] Processing individual plants..." << std::endl;
     // Get plantarchitecture plant ids
     std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
     for (uint &id : plant_ids) {
+
+        // Update color
+        // // Set default color for whole plant
+        // std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
+        // context.setPrimitiveData(
+        //     UUIDs_plants, "reflectivity_spectrum","leaf_reflectivity_cowpea");
+        // context.setPrimitiveData(
+        //     UUIDs_plants, "transmissivity_spectrum","leaf_transmissivity_cowpea");
 
         // label plants
         std::vector<uint> single_plant_UUIDs = plantarchitecture.getAllPlantObjectIDs(id);
         std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(single_plant_UUIDs);
         context.setPrimitiveData(uuids_plant, "plant", id);
-
+        
         // Get flower obj id in plantarchitecture
+        // Assign spectrum data and label
         std::vector<uint> flower_obj_ids =
             plantarchitecture.getPlantFlowerObjectIDs(id);
-
         for (uint &flower_obj_id : flower_obj_ids) {
             std::vector<uint> uuids_flower =
                 context.getObjectPrimitiveUUIDs(flower_obj_id);
@@ -230,84 +220,77 @@ void update_leafoptics(Context &context,
             // pod labeling
             context.setPrimitiveData(uuids_pod, "pod", pod_obj_id);
         }
+        // Update peduncle optical properties using PROSPECT-generated spectra
+        std::vector<uint> peduncle_obj_ids = plantarchitecture.getPlantPeduncleObjectIDs(id);
+        std::vector<uint> uuids_peduncle = context.getObjectPrimitiveUUIDs(peduncle_obj_ids);
+        context.setPrimitiveData(uuids_peduncle, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
+        context.setPrimitiveData(uuids_peduncle, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
+        context.setPrimitiveData(uuids_peduncle, "specular_exponent", 2.0f);
+
+    
+        // Update internode optical properties using PROSPECT-generated spectra
+        std::vector<uint> internode_obj_ids = plantarchitecture.getPlantInternodeObjectIDs(id);
+        std::vector<uint> uuids_internode = context.getObjectPrimitiveUUIDs(internode_obj_ids);
+        context.setPrimitiveData(uuids_internode, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
+        context.setPrimitiveData(uuids_internode, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
+        context.setPrimitiveData(uuids_internode, "specular_exponent", 2.0f);
+
+        // Update petiole optical properties using PROSPECT-generated spectra
+        std::vector<uint> petiole_obj_ids = plantarchitecture.getPlantPetioleObjectIDs(id);
+        std::vector<uint> uuids_petiole = context.getObjectPrimitiveUUIDs(petiole_obj_ids);
+        context.setPrimitiveData(uuids_petiole, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
+        context.setPrimitiveData(uuids_petiole, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
+        context.setPrimitiveData(uuids_petiole, "specular_exponent", 2.0f);
 
         // Update leaf optical properties using PROSPECT-generated spectra
         std::vector<uint> leaf_obj_ids = plantarchitecture.getPlantLeafObjectIDs(id);
         std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(leaf_obj_ids);
         context.setPrimitiveData(uuids_leaf, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
         context.setPrimitiveData(uuids_leaf, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
-        context.setPrimitiveData(uuids_leaf, "specular_exponent", 10.f);
+        context.setPrimitiveData(uuids_leaf, "specular_exponent", 2.0f);
     }
 }
 
 
-void init_radiation_model(Context &context,
+void init_spectral_data(Context &context,
                           RadiationModel &radiation,
                           PlantArchitecture &plantarchitecture,
                           LeafOptics& leafoptics,
                           const CameraSetup& camera_setup,
-                          json sampled_params,
-                          std::vector<uint> UUIDs_ground) {
+                          json sampled_params) {
+    /*
+    Inits spectral data. There are three ways to initialize the spectrum data
+    1. Load from XML
+    2. Blend from radiation model
+    3. Using leaf optics model
+    */
 
-    if (g_debug_mode) std::cout << "[DEBUG] Loading radiation XML files..." << std::endl;
     auto radiation_cfg = sampled_params["radiationmodel"];
-    // load color and reflectivity data
+    
+    // Part 1: load color and reflectivity data from XML
     context.loadXML(radiation_cfg["colorboard"].get<std::string>().c_str(),
                     true);
     context.loadXML(radiation_cfg["leaf_surface_spectral_data"]["file"]
-                        .get<std::string>()
-                        .c_str(),
-                    true);
+                        .get<std::string>().c_str(), true);
     context.loadXML(radiation_cfg["soil_surface_spectral_data"]["file"]
-                        .get<std::string>()
-                        .c_str(),
-                    true);
+                        .get<std::string>().c_str(), true);
     context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
     context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
     context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
     context.renameGlobalData("ColorReference_DGK_01", "spectrum_white");
-    if (g_debug_mode) std::cout << "[DEBUG] Preparing spectral blends..." << std::endl;
 
-    // prepare custom flower colors
+    // Part 2: blending spectrum  by using radiation model
+    // custom flower colors
     radiation.blendSpectra("reflectivity_flower_cowpea_closed",
                            {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
     radiation.blendSpectra("reflectivity_flower_cowpea_open",
                            {"spectrum_purple", "spectrum_white"},
                            {0.10, 0.90}); // mostly white with purple tint
 
-    // prepare custom pod colors
+    // custom pod colors
     radiation.blendSpectra("reflectivity_pod_cowpea",
                            {"spectrum_yellow", "spectrum_green"}, {0.95, 0.05});
 
-    DEBUG_PRINT();
-
-    if (g_debug_mode) std::cout << "[DEBUG] Setting plant spectral properties..." << std::endl;
-    // Set default color for whole plant
-    std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
-    context.setPrimitiveData(
-        UUIDs_plants, "reflectivity_spectrum",
-        radiation_cfg["leaf_surface_spectral_data"]
-                      ["reflectivity"]
-                          .get<std::string>());
-    context.setPrimitiveData(
-        UUIDs_plants, "transmissivity_spectrum",
-        radiation_cfg["leaf_surface_spectral_data"]
-                      ["transmissivity"]
-                          .get<std::string>());
-
-    // Set default color for soil
-    context.setPrimitiveData(
-        UUIDs_ground, "reflectivity_spectrum",
-        radiation_cfg["soil_surface_spectral_data"]
-                      ["reflectivity"]
-                          .get<std::string>());
-    // Make the ground plane single-sided (only visible from above)
-    context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
-
-    // Specular reflection causes a surface to look "shiny"
-    // context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
-    // context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
-    if (g_debug_mode) std::cout << "[DEBUG] Adding sun and radiation bands..." << std::endl;
     // set up sun lighting
     uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
     radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
@@ -325,8 +308,6 @@ void init_radiation_model(Context &context,
     radiation.setDiffuseSpectrum("solar_spectrum_diffuse_ASTMG173");
 
     std::string cameralabel = "camera";    
-
-    if (g_debug_mode) std::cout << "[DEBUG] Adding radiation camera..." << std::endl;
     // add the camera to the radiation model
     radiation.addRadiationCamera(cameralabel, bandlabels, camera_setup.camera_position,
                                  camera_setup.camera_lookat, camera_setup.cam_prop, 100);
@@ -344,7 +325,24 @@ void init_radiation_model(Context &context,
     radiation.setCameraSpectralResponse(cameralabel, "blue",
                                         (camera_type + "_blue").c_str());
 
-    if (g_debug_mode) std::cout << "[DEBUG] Radiation model initialization complete." << std::endl;
+
+    // Part 3: Leaf optics
+    // Initialize leaf optics properties with fitted parameters
+    LeafOpticsProperties leafopticsprops;
+    leafoptics.getPropertiesFromLibrary("cowpea", leafopticsprops);
+    leafopticsprops.numberlayers = sampled_params["leafoptics"].value("number_layers", 1.5824);
+    leafopticsprops.chlorophyllcontent = sampled_params["leafoptics"].value("chlorophyll_content", 37.4129);
+    leafopticsprops.carotenoidcontent = sampled_params["leafoptics"].value("carotenoid_content", 12.2658);
+    leafopticsprops.anthocyancontent = sampled_params["leafoptics"].value("anthocyan_content", 0.958622);
+    leafopticsprops.brownpigments = sampled_params["leafoptics"].value("brown_pigments", 0.01339);
+    leafopticsprops.watermass = sampled_params["leafoptics"].value("water_mass", 0.01346);
+    leafopticsprops.drymass = sampled_params["leafoptics"].value("dry_mass", 0.00315556);
+    leafopticsprops.protein = sampled_params["leafoptics"].value("protein", 0.0);
+    leafopticsprops.carbonconstituents = sampled_params["leafoptics"].value("carbon_constituents", 0.0);
+
+    // Run cowpea model to generate leaf_reflectivity_cowpea and leaf_transmissivity_cowpea
+    leafoptics.run(leafopticsprops, "cowpea");
+
     return;
 }
 
@@ -630,15 +628,8 @@ int main(int argc, char *argv[]) {
     leafoptics.disableMessages();
     RadiationModel radiation(&context);
     PlantArchitecture plantarchitecture(&context);
+
     for (int i = 0; i < num_iterations; ++i) {
-       
-        json sampled_params;
-
-        // filename with zero-padded iteration number
-        std::stringstream filename_stream;
-        filename_stream << output_name << "_" << std::setw(4) << std::setfill('0') << i;
-        std::string filename = filename_stream.str();
-
         // Notes:
         // Recursively add "sampled" values to all parameters
         // But the problem here is some keys need to be sampled, but some are already determined
@@ -656,10 +647,113 @@ int main(int argc, char *argv[]) {
         // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
         // auto_config will be deleted when pythpn geneates it
         // Ran
+
+        json sampled_params;
         sampled_params = sampleParams(json_params, rng);
 
         // Save the seed value to sampled_params
         sampled_params["seed"] = final_seed;
+        
+        // filename with zero-padded iteration number
+        std::stringstream filename_stream;
+        filename_stream << output_name << "_" << std::setw(4) << std::setfill('0') << i;
+        std::string filename = filename_stream.str();
+
+
+        // Set camera
+        CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
+        CameraProperties cam_prop = camera_setup.cam_prop;
+        vec3 camera_position = camera_setup.camera_position;
+        vec3 camera_lookat = camera_setup.camera_lookat;
+        SphericalCoord sun_dir = camera_setup.sun_dir;
+
+        // Init spectra
+        if (args.run_radiation) {
+            // Initialize the radiation model
+            init_spectral_data(context, radiation, plantarchitecture,
+                                leafoptics, camera_setup, sampled_params);
+        }
+
+        // create ground - either OBJ-based or tile-based
+        std::vector<uint> UUIDs_ground;
+        if (sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>()) {
+            UUIDs_ground = make_field(context, sampled_params);
+        } else {
+            // Calculate pixel size on ground based on camera FOV and resolution from params
+            auto cam_prop = sampled_params["cameraproperties"];
+            float camera_height = cam_prop["camera_height"].get<float>();
+            float HFOV = cam_prop["HFOV"].get<float>();
+            int camera_res_x = cam_prop["camera_resolution_x"].get<int>();
+            int camera_res_y = cam_prop["camera_resolution_y"].get<int>();
+            
+            float HFOV_rad = deg2rad(HFOV);
+            float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
+            float VFOV_rad = deg2rad(VFOV);
+            
+            // Ground coverage in each dimension
+            float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
+            float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
+            
+#if 0
+            // load dirt texture with fixed size (original method)
+            float ground_x = sampled_params["field"]["plot_shape"]["size_x"];
+            float ground_y = sampled_params["field"]["plot_shape"]["size_y"];
+#else   
+            // Automatically calculate ground size
+            float ground_x = ground_width_visible * 1.05; // 5 percent buffer
+            float ground_y = ground_height_visible * 1.05; // 5 percent buffer
+            sampled_params["field"]["plot_shape"]["size_x"] = ground_width_visible;
+            sampled_params["field"]["plot_shape"]["size_y"] = ground_height_visible;
+#endif
+            helios::vec3 tile_center = make_vec3(0, 0, 0);
+            helios::vec2 tile_size = make_vec2(0.1, 0.1);
+            helios::vec2 field_size = make_vec2(ground_x, ground_y);
+
+            // Pixel size on ground
+            float pixel_size_x = ground_width_visible / camera_res_x;
+            float pixel_size_y = ground_height_visible / camera_res_y;
+            float pixel_size = std::max(pixel_size_x, pixel_size_y);
+            
+            // Set patch size to be smaller than pixel size (half pixel for good sampling)
+            float desired_patch_size = pixel_size * 0.5f;
+            int subdiv_x = std::max(100, (int)(ground_x / desired_patch_size));
+            int subdiv_y = std::max(100, (int)(ground_y / desired_patch_size));
+
+            // Prevent exceeding texture resolution constraints by clamping subdivisions
+            // Many bundled textures are ~1024x1024; large subdivision counts can trigger errors.
+            const int MAX_SUBDIV_PER_AXIS = 512; // conservative cap to avoid Context::addTile errors
+            int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
+            int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
+
+            if (g_debug_mode) {
+                std::cout << "[DEBUG] Ground tile subdivision calculation:" << std::endl;
+                std::cout << "  Camera height: " << camera_height << " m" << std::endl;
+                std::cout << "  Ground visible: " << ground_width_visible << " x " << ground_height_visible << " m" << std::endl;
+                std::cout << "  Pixel size on ground: " << pixel_size << " m" << std::endl;
+                std::cout << "  Desired patch size: " << desired_patch_size << " m" << std::endl;
+                std::cout << "  Subdivision (raw): " << subdiv_x << " x " << subdiv_y << std::endl;
+                if (subdiv_x != clamped_subdiv_x || subdiv_y != clamped_subdiv_y) {
+                    std::cout << "  Subdivision (clamped): " << clamped_subdiv_x << " x " << clamped_subdiv_y << std::endl;
+                }
+            }
+            // Keep texture repeat tied to visual tiling
+            int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
+            UUIDs_ground = context.addTile(tile_center, field_size,
+                                           make_SphericalCoord(0, 0),
+                                           make_int2(clamped_subdiv_x, clamped_subdiv_y),
+                                           "plugins/visualizer/textures/dirt.jpg",
+                                           texture_repeat);
+        }
+        // Set default color for soil
+        context.setPrimitiveData(
+            UUIDs_ground, "reflectivity_spectrum",
+            sampled_params["radiationmodel"]["soil_surface_spectral_data"]
+                        ["reflectivity"]
+                            .get<std::string>());
+        // Make the ground plane single-sided (only visible from above)
+        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
+        // Make ground shiny?
+        context.setPrimitiveData(UUIDs_ground, "specular_exponent", 1.f);
 
         // Create multiple plots in a grid pattern
         std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
@@ -723,7 +817,7 @@ int main(int argc, char *argv[]) {
 
              // params.json only have single plant type within plot for now
             init_plant_architecture(plantarchitecture, sampled_params);
-
+            
             // Get crop type and convert to lowercase for plant library
             for (int j = 0; j < num_plants; j++) {
                 int bed = plants[j]["bed"];
@@ -734,8 +828,6 @@ int main(int argc, char *argv[]) {
 
                 // Select the specific crop
                 json selected_crop = plants[j];
-                
-
                 
                 // plant count and age can be changed here
                 vec3 origin(0, 0, 0);
@@ -783,92 +875,10 @@ int main(int argc, char *argv[]) {
             sampled_params["field"].erase("auto_config");
         }
 
-        // save sampled parameters
-        std::string params_filename = output_dir + "/" + filename + "_params.json";
-        std::ofstream params_file(params_filename);
-        // params_file << std::scientific << std::setprecision(4) << sampled_params << std::endl;
-        // params_file.close();
-        params_file << std::setw(4) << sampled_params << std::endl;
-        params_file.close();
+
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
-        printSystemMemoryUsage("After loading plants");
-        printGPUMemoryUsage("After loading plants");
-
-        // create ground - either OBJ-based or tile-based
-        std::vector<uint> UUIDs_ground;
-        if (sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>()) {
-            //UUIDs_ground = createObjGround(context, sampled_params);
-            UUIDs_ground = make_field(context, sampled_params);
-            DEBUG_PRINT("OBJ ground created");
-            printSystemMemoryUsage("After creating OBJ ground");
-            printGPUMemoryUsage("After creating OBJ ground");
-        } else {
-            
-            // Calculate pixel size on ground based on camera FOV and resolution from params
-            auto cam_prop = sampled_params["cameraproperties"];
-            float camera_height = cam_prop["camera_height"].get<float>();
-            float HFOV = cam_prop["HFOV"].get<float>();
-            int camera_res_x = cam_prop["camera_resolution_x"].get<int>();
-            int camera_res_y = cam_prop["camera_resolution_y"].get<int>();
-            
-            float HFOV_rad = deg2rad(HFOV);
-            float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
-            float VFOV_rad = deg2rad(VFOV);
-            
-            // Ground coverage in each dimension
-            float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
-            float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
-            
-#if 0
-            // load dirt texture with fixed size (original method)
-            float ground_x = sampled_params["field"]["plot_shape"]["size_x"];
-            float ground_y = sampled_params["field"]["plot_shape"]["size_y"];
-#else
-            float ground_x = ground_width_visible * 1.05; // 5 percent buffer
-            float ground_y = ground_height_visible * 1.05; // 5 percent buffer
-#endif
-            helios::vec3 tile_center = make_vec3(0, 0, 0);
-            helios::vec2 tile_size = make_vec2(0.1, 0.1);
-            helios::vec2 field_size = make_vec2(ground_x, ground_y);
-
-            // Pixel size on ground
-            float pixel_size_x = ground_width_visible / camera_res_x;
-            float pixel_size_y = ground_height_visible / camera_res_y;
-            float pixel_size = std::max(pixel_size_x, pixel_size_y);
-            
-            // Set patch size to be smaller than pixel size (half pixel for good sampling)
-            float desired_patch_size = pixel_size * 0.5f;
-            int subdiv_x = std::max(100, (int)(ground_x / desired_patch_size));
-            int subdiv_y = std::max(100, (int)(ground_y / desired_patch_size));
-
-            // Prevent exceeding texture resolution constraints by clamping subdivisions
-            // Many bundled textures are ~1024x1024; large subdivision counts can trigger errors.
-            const int MAX_SUBDIV_PER_AXIS = 512; // conservative cap to avoid Context::addTile errors
-            int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
-            int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
-
-            if (g_debug_mode || true) {
-                std::cout << "[DEBUG] Ground tile subdivision calculation:" << std::endl;
-                std::cout << "  Camera height: " << camera_height << " m" << std::endl;
-                std::cout << "  Ground visible: " << ground_width_visible << " x " << ground_height_visible << " m" << std::endl;
-                std::cout << "  Pixel size on ground: " << pixel_size << " m" << std::endl;
-                std::cout << "  Desired patch size: " << desired_patch_size << " m" << std::endl;
-                std::cout << "  Subdivision (raw): " << subdiv_x << " x " << subdiv_y << std::endl;
-                if (subdiv_x != clamped_subdiv_x || subdiv_y != clamped_subdiv_y) {
-                    std::cout << "  Subdivision (clamped): " << clamped_subdiv_x << " x " << clamped_subdiv_y << std::endl;
-                }
-            }
-            // Keep texture repeat tied to visual tiling
-            int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
-            UUIDs_ground = context.addTile(tile_center, field_size,
-                                           make_SphericalCoord(0, 0),
-                                           make_int2(clamped_subdiv_x, clamped_subdiv_y),
-                                           "plugins/visualizer/textures/dirt.jpg",
-                                           texture_repeat);
-        }
-
         // Age only plants that were built from library (not from XML)
         if (!plant_IDs_aging.empty()) {
             // plants are planted in a single day -> Age all together
@@ -885,7 +895,6 @@ int main(int argc, char *argv[]) {
                           << " days" << std::endl;
             }
         }
-
 
         // Write the plant structure to an XML file
         if (args.save_xml) {
@@ -959,12 +968,6 @@ int main(int argc, char *argv[]) {
                     // Fallback: add as a top-level array
                     sampled_params["xml_files"] = xml_file_paths;
                 }
-                
-                // Re-save the params file with XML paths
-                std::ofstream params_file_update(params_filename);
-                params_file_update << std::setw(4) << sampled_params << std::endl;
-                params_file_update.close();
-                std::cout << "Updated parameters file with XML paths: " << params_filename << std::endl;
             }
         }
 
@@ -975,12 +978,14 @@ int main(int argc, char *argv[]) {
             calibration.addCalibriteColorboard(make_vec3(0, 0.75, 0.001), 0.025);
         }
 
-        // Set camera
-        CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
-        CameraProperties cam_prop = camera_setup.cam_prop;
-        vec3 camera_position = camera_setup.camera_position;
-        vec3 camera_lookat = camera_setup.camera_lookat;
-        SphericalCoord sun_dir = camera_setup.sun_dir;
+        // save sampled parameters
+        std::string params_filename = output_dir + "/" + filename + "_params.json";
+        std::ofstream params_file(params_filename);
+        // params_file << std::scientific << std::setprecision(4) << sampled_params << std::endl;
+        // params_file.close();
+        params_file << std::setw(4) << sampled_params << std::endl;
+        params_file.close();
+        
 
         // Add debug patch
         if (args.debug) {
@@ -1070,16 +1075,6 @@ int main(int argc, char *argv[]) {
 
         // Run radiation model by default true
         if (args.run_radiation) {
-            printSystemMemoryUsage("Before radiation init");
-            printGPUMemoryUsage("Before radiation init");
-            if (g_debug_mode) std::cout << "[DEBUG] Initializing radiation model..." << std::endl;
-            // Initialize the radiation model
-            init_radiation_model(context, radiation, plantarchitecture,
-                                 leafoptics, camera_setup, sampled_params,
-                                 UUIDs_ground);
-            printSystemMemoryUsage("After radiation init");
-            printGPUMemoryUsage("After radiation init");
-
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
             std::string cameralabel = "camera";
 
