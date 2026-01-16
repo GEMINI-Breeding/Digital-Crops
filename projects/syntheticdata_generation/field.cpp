@@ -93,21 +93,22 @@ std::vector<helios::uint> createObjGround(helios::Context& context, const json& 
 
 std::vector<uint> make_field(helios::Context& context, const json& params) {
 
-    auto config = params["plots"];
-    int n_beds = config["num_beds"]["sampled"].get<int>(); 
-    int n_rows = config["num_rows"]["sampled"].get<int>(); 
+    auto field = params["field"];
+    auto plot_shape = field["plot_shape"];
+    int n_beds = field["num_beds"].get<int>(); 
+    int n_rows = field["num_rows"].get<int>(); 
     
-    std::string obj_path = params["ground"]["obj_file_path"].get<std::string>();
+    std::string obj_path = plot_shape["obj_file_path"].get<std::string>();
 
     // Manipulate mtl file before loading OBJ file
     std::string orig_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl.orig";
 
-    // Replace numbers with soil color in the config
+    // Replace numbers with soil color in the field
     float soil_color[3];
-    if (config.contains("soil_color") && config["soil_color"].is_array())
+    if (plot_shape.contains("soil_color") && plot_shape["soil_color"].is_array())
     {   
         int cnt = 0;
-        for (const auto& color_val : config["soil_color"])
+        for (const auto& color_val : plot_shape["soil_color"])
         {
             // Push to the array
             soil_color[cnt] = color_val.get<float>();
@@ -135,16 +136,19 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
         file.close();
     }
 
-    std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), config["bed_height"], nullrotation, RGB::white);
+    std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), \
+                    plot_shape["plot_height"], nullrotation, RGB::white);
 
     // Rescale only X and Y to match bed dimensions, preserve Z from DEM
     // The OBJ file already has correct Z values (elevations) normalized to plant locations
-    vec3 bed_extent = make_vec3(config["bed_width"].get<float>(), config["bed_length"].get<float>(), config["bed_height"].get<float>());
-    rescaleUUIDsToSize(context, UUIDs, bed_extent);
-    
+    vec3 plot_extent = make_vec3(plot_shape["plot_width"].get<float>(), \
+                    plot_shape["plot_length"].get<float>(), plot_shape["plot_height"].get<float>());
+    rescaleUUIDsToSize(context, UUIDs, plot_extent);
+
+#if 1
     // Apply plot heading rotation if specified
-    if (config.contains("plot_heading")) {
-        float plot_heading_deg = config["plot_heading"]["value"].get<float>();
+    if (plot_shape.contains("plot_heading")) {
+        float plot_heading_deg = plot_shape["plot_heading"].get<float>();
         if (plot_heading_deg != 0.0f) {
             // Convert degrees to radians and rotate around Z-axis
             float plot_heading_rad = plot_heading_deg * M_PI / 180.0f;
@@ -152,6 +156,7 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
             std::cout << "Rotated ground mesh by " << plot_heading_deg << " degrees" << std::endl;
         }
     }
+#endif
 
     // Compute bounding box for the original OBJ once, since it's the same for all copies
     helios::vec3 min_corner, max_corner, extent;

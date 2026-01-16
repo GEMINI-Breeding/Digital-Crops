@@ -1,116 +1,107 @@
 {
   "output_directory": "output",
-
   "iterations": 1,
-
   "plant": "cowpea",
-
   "plots": {
-    "mode": "auto",
+    "mode": "manual",
     "location": "Davis",
     "year": 2023,
     "crop_types": ["cowpea", "bean", "sorghum"],
-    "num_beds": { "sampling": "uniform", "min": 1, "max": 1 },
-    "num_rows": { "sampling": "uniform", "min": 1, "max": 1 },
-    "bed_spacing_x": { "sampling": "constant", "value": 1.0 },
-    "bed_spacing_y": { "sampling": "constant", "value": 1.0 },
+    "num_beds": { "sampling": "uniform", "min": 1, "max": 1, "type": "int" },
+    "num_rows": { "sampling": "uniform", "min": 1, "max": 1, "type": "int" },
+    "bed_spacing_x": { "sampling": "constant", "value": 1.0, "type": "float" },
+    "bed_spacing_y": { "sampling": "constant", "value": 1.0, "type": "float" },
     "bed_height": 0.2,
-    "bed_width": 2,
-    "bed_length": 4,
+    "bed_width": 3.0,
+    "bed_length": 6.0,
     "soil_color": [0.61, 0.58, 0.55],
+    "initialize": {
+      "plant_count": { "sampling": "uniform", "min": 5, "max": 7, "type": "int" },
+      "plant_age": { "sampling": "uniform", "min": 10, "max": 30, "type": "int" },
+      "plant_spacing_x": { "sampling": "uniform", "min": 0.5, "max": 0.75, "type": "float" },
+      "plant_spacing_y": { "sampling": "uniform", "min": 0.5, "max": 1.0, "type": "float" },
+      "num_columns": { "sampling": "uniform", "min": 1, "max": 2 }
+    },
+    "ground": {
+      "size_x": { "sampling": "constant", "value": 2.5 },
+      "size_y": { "sampling": "constant", "value": 5.0 },
+      "use_obj_ground": true,
+      "obj_file_path": "../../../obj/dirt_rocks.obj",
+      "ground_scale": { "sampling": "constant", "value": 0.1 }
+    },
     "crops": [
       {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0,
-        "y": 0
+        "y": 0,
+        "xml": ""
       },
       {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0,
-        "y": 0.75
+        "y": 0.75,
+        "xml": ""
       },
       {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0,
-        "y": 1.5
+        "y": 1.5,
+        "xml": ""
       },
       {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0,
-        "y": -0.75
+        "y": -0.75,
+        "xml": ""
       },
       {
         "crop_type": "cowpea",
         "bed": 0,
         "row": 0,
         "x": 0,
-        "y": -1.5
+        "y": -1.5,
+        "xml": ""
       }
     ]
   },
 
-  "ground": {
-
-    "size_x": { "sampling": "constant", "value": 2.5 },
-    "size_y": { "sampling": "constant", "value": 5.0 },
-
-    "use_obj_ground": false,
-    "obj_file_path": "../../../obj/dirt_rocks.obj",
-    "ground_scale": { "sampling": "constant", "value": 0.1 }
-
-  },
-
   "sun_position": {
-
-    "elevation_degrees": { "sampling": "constant", "value": 45.0 },
-    "azimuth_degrees": { "sampling": "constant", "value": 45.0 },
+    "elevation_degrees": { "sampling": "uniform", "min": 0, "max": 90 },
+    "azimuth_degrees": { "sampling": "uniform", "min": 0, "max": 360 },
     "shadow": true
   },
 
   "plantarchitecture": {
-
-    "initialize": {
-      "plant_count": { "sampling": "uniform", "min": 5.0, "max": 7.0 },
-      "plant_age": { "sampling": "uniform", "min": 60.0, "max": 60.0 },
-      "plant_spacing_x": { "sampling": "uniform", "min": 0.5, "max": 0.75 },
-      "plant_spacing_y": { "sampling": "uniform", "min": 0.5, "max": 1.0 },
-      "num_columns": { "sampling": "uniform", "min": 1, "max": 2 }
-    },
-
     "phytomer_parameters": {
       "leaf_pitch": { "sampling": "uniform", "min": -90.0, "max": 90.0 }
     },
-
     "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
-
   },
 
   "cameraproperties": {
-    
     "camera_height": { "sampling": "uniform", "min": 1.5, "max": 1.5 },
     "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
     "lens_diameter": { "sampling": "constant", "value": 0.0028 },
-    "HFOV": { "sampling": "constant", "value": 108.0 },
-    "camera_resolution_x": { "sampling": "constant", "value": 1920 },
-    "camera_resolution_y": { "sampling": "constant", "value": 1080 },
+    "HFOV": { "sampling": "constant", "value": 120.0 },
+    "camera_resolution_x": { "sampling": "constant", "value": 1920, "type": "int" },
+    "camera_resolution_y": { "sampling": "constant", "value": 1080, "type": "int" },
 
     "camera_positioning": {
       "distance_from_center": { "sampling": "uniform", "min": 0.01, "max": 0.01 },
-      "center_plants": true,
+      "center_plants": false,
       "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
       "lookat_offset_x": { "sampling": "constant", "value": 0.0 },
       "lookat_offset_y": { "sampling": "constant", "value": 0.0 },
       "lookat_offset_z": { "sampling": "constant", "value": 0.0 }
     }
-
   },
 
   "radiationmodel": {

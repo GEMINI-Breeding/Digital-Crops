@@ -38,6 +38,7 @@ build_release/
 */build_release/
 **/build/
 **/build_release/
+**/build_release_back/
 cmake-build-*/
 **/cmake-build-*/
 DigitalSorghum/cmake-build-debug

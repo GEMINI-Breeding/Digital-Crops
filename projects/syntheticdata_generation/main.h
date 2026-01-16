@@ -5,16 +5,10 @@
 #ifndef HELIOS_MAIN_H
 #define HELIOS_MAIN_H
 
-
-
-#include "json.hpp"
-
 #include <random>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-using json = nlohmann::json;
 
 // Forward declarations
 namespace helios {

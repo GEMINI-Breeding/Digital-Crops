@@ -16,7 +16,7 @@ namespace YAML {
     class Node;
 }
 
-using json = nlohmann::json;
+using json = nlohmann::ordered_json; // Keeps the JSON key orders
 
 class CanopyGenerator;
 

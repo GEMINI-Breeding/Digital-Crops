@@ -37,30 +37,28 @@ struct CameraSetup {
 };
 
 void init_plant_architecture(PlantArchitecture& plantarchitecture,
-                             Context& context, json sampled_params) {
+                             json sampled_params) {
 
     // Load plant from Helios Library
-    plantarchitecture.loadPlantModelFromLibrary(sampled_params["plant"]);
+    plantarchitecture.loadPlantModelFromLibrary(sampled_params["field"]["plant_type"]);
 
     // Get the shoot parameters
     std::map<std::string, ShootParameters> shoot_params =
         plantarchitecture.getCurrentShootParameters();
 
     // update leaf pitch and peduncle length
-    float leaf_pitch =
-        sampled_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"]
-                      ["sampled"];
-    float flower_bud_break_prob =
-        sampled_params["plantarchitecture"]["flower_bud_break_probability"]
-                      ["sampled"];
-    shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch = leaf_pitch;
-    shoot_params.at("trifoliate").flower_bud_break_probability =
-        flower_bud_break_prob;
+    shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch    \
+     = sampled_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"];
+    shoot_params.at("trifoliate").flower_bud_break_probability      \
+     = sampled_params["plantarchitecture"]["flower_bud_break_probability"];
 
-    // update leaf
+
+    // update leaf (comment out  below to render faster)
+#if 0
     shoot_params.at("trifoliate")
         .phytomer_parameters.leaf.prototype.prototype_function =
         CowpeaLeafPrototype_trifoliate_OBJ;
+#endif
 
     // apply updated parameters
     plantarchitecture.updateCurrentShootParameters(
@@ -80,17 +78,17 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     
     // focus on center of scene
     setup.cam_prop.focal_plane_distance =
-        cam_prop_json["camera_height"]["sampled"].get<float>() -
-        cam_prop_json["focal_plane_distance_difference"]["sampled"].get<float>(); 
+        cam_prop_json["camera_height"].get<float>() -
+        cam_prop_json["focal_plane_distance_difference"].get<float>(); 
 
     // make it small so it will be in focus
     setup.cam_prop.lens_diameter =
-        cam_prop_json["lens_diameter"]["sampled"].get<float>(); 
+        cam_prop_json["lens_diameter"].get<float>(); 
 
-    setup.cam_prop.HFOV = cam_prop_json["HFOV"]["sampled"].get<float>();
+    setup.cam_prop.HFOV = cam_prop_json["HFOV"].get<float>();
     setup.cam_prop.camera_resolution = make_int2(
-        cam_prop_json["camera_resolution_x"]["sampled"].get<int>(),
-        cam_prop_json["camera_resolution_y"]["sampled"].get<int>());
+        cam_prop_json["camera_resolution_x"].get<int>(),
+        cam_prop_json["camera_resolution_y"].get<int>());
 
     // setup.cam_prop.FOV_aspect_ratio =
     //     float(setup.cam_prop.camera_resolution.x) /
@@ -128,14 +126,14 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     // Convert azimuth angle from degrees to radians
     float azimuth_rad =
         deg2rad(cam_prop_json["camera_positioning"]
-                              ["azimuth_angle"]["sampled"]
+                              ["azimuth_angle"]
                                   .get<float>());
                                 // Assuming looking the x axis direction
                                 // towards zero when azimuth_angle=0
 
     // Calculate camera position based on plant canopy center
     float dist = cam_prop_json["camera_positioning"]
-                                      ["distance_from_center"]["sampled"]
+                                      ["distance_from_center"]
                                           .get<float>();
     
     // Camear rotation starts at -pi / 2 to see y axis up when rad = 0
@@ -143,21 +141,21 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     setup.camera_position.x = canopy_center.x + dist*sin(azimuth_rad); 
     setup.camera_position.y = canopy_center.y - dist*cos(azimuth_rad);
     setup.camera_position.z =
-        cam_prop_json["camera_height"]["sampled"]
+        cam_prop_json["camera_height"]
             .get<float>();
 
     // Calculate camera lookat point (slightly offset from canopy center)
     setup.camera_lookat.x = canopy_center.x + cam_prop_json["camera_positioning"]
-                        ["lookat_offset_x"]["sampled"].get<float>();
+                        ["lookat_offset_x"].get<float>();
     setup.camera_lookat.y = canopy_center.y + cam_prop_json["camera_positioning"]
-                        ["lookat_offset_y"]["sampled"].get<float>();
+                        ["lookat_offset_y"].get<float>();
     setup.camera_lookat.z = canopy_center.z + cam_prop_json["camera_positioning"]
-                        ["lookat_offset_z"]["sampled"].get<float>();
+                        ["lookat_offset_z"].get<float>();
 
     setup.sun_dir = make_SphericalCoord(
-        deg2rad(sampled_params["sun_position"]["elevation_degrees"]["sampled"]
+        deg2rad(sampled_params["sun_position"]["elevation_degrees"]
                     .get<float>()),
-        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]["sampled"]
+        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]
                      .get<float>()));
     
     return setup;
@@ -235,8 +233,7 @@ void init_radiation_model(Context &context,
     // Initialize leaf optics properties
     LeafOpticsProperties leafopticsprops;
     leafopticsprops.chlorophyllcontent =
-        sampled_params["leafoptics"]["chlorophyll_content"]["sampled"]
-            .get<int>();
+        sampled_params["leafoptics"]["chlorophyll_content"].get<int>();
     
     if (g_debug_mode) std::cout << "[DEBUG] Processing individual plants..." << std::endl;
     // Get plantarchitecture plant ids
@@ -297,7 +294,7 @@ void init_radiation_model(Context &context,
         }
 
     }
-
+    
     if (g_debug_mode) std::cout << "[DEBUG] Adding sun and radiation bands..." << std::endl;
     // set up sun lighting
     uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
@@ -358,7 +355,7 @@ struct CommandLineOptions {
     bool rotation_view = false;
     bool grow = false;
     bool debug = false;
-    bool save_xml = false;
+    bool save_xml = true;
     bool stats_only = false;
     bool gui = false;
     bool run_radiation = true;  // Run faster if running without radiation?
@@ -367,7 +364,7 @@ struct CommandLineOptions {
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
-    int start_iteration = 0;
+    int num_iterations = 1;
     std::string tile_file;
     std::string output_dir;
     std::string output_name;
@@ -418,7 +415,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --days N                 Set number of days (default: 0)\n"
                       << "  -s, --seed N             Set random seed (default: random)\n"
                       << "  -n, --name NAME          Set output name (default: 'plot')\n"
-                      << "  -i, --iteration N        Set start iteration (default: 0)\n"
+                      << "  -i, --iteration N        Set iterations (default: 0)\n"
                       << "  --help                   Show this help message\n";
             std::exit(0);
         }
@@ -456,7 +453,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.seed = static_cast<unsigned int>(std::stoi(argv[++i]));
                 std::printf("Seed: %u\n", options.seed);
             } else if (arg == "-i" || arg == "--iteration") {
-                options.start_iteration = std::max(std::atoi(argv[++i]), 0);
+                options.num_iterations = std::max(std::atoi(argv[++i]), 0);
             } else if (arg == "-f" || arg == "--file") {
                 options.params_file = argv[++i];
             } else {
@@ -484,7 +481,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  height: " << options.height << std::endl;
         std::cout << "  days: " << options.days << std::endl;
         std::cout << "  seed: " << options.seed << std::endl;
-        std::cout << "  start_iteration: " << options.start_iteration << std::endl;
+        std::cout << "  num_iterations: " << options.num_iterations << std::endl;
         std::cout << "  tile_file: '" << options.tile_file << "'" << std::endl;
         std::cout << "  output_dir: '" << options.output_dir << "'" << std::endl;
         std::cout << "  output_name: '" << options.output_name << "'" << std::endl;
@@ -549,19 +546,36 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments using dedicated function
     CommandLineOptions args = parseCommandLineArgs(argc, argv);
 
-    // Set up random device and random number generator
-    std::random_device rd;
-    std::mt19937 rng(args.seed != 0 ? args.seed : rd());
-
-    // load parameters
+    // load parameters first to check for seed in JSON
     std::string params_file;
     if (args.params_file.size() > 0) {
         params_file = args.params_file;
     } else {
-        params_file = "drone_output/plot_21_3_0000_params.json";
+        params_file = "../params.json";
     }
     std::cout << "Loading " << params_file << std::endl;
     json json_params = loadParametersFromJson(params_file);
+
+    // Determine seed with priority: JSON → command line → random
+    unsigned int final_seed;
+    std::random_device rd;
+    
+    if (args.seed != 0) {
+        // Command line argument has highest priority
+        final_seed = args.seed;
+        std::cout << "Using seed from command line: " << final_seed << std::endl;
+    } else if (json_params.contains("seed") && json_params["seed"].is_number_integer()) {
+        // Check if seed is defined in JSON
+        final_seed = json_params["seed"].get<unsigned int>();
+        std::cout << "Using seed from JSON config: " << final_seed << std::endl;
+    } else {
+        // Generate random seed
+        final_seed = rd();
+        std::cout << "Generated random seed: " << final_seed << std::endl;
+    }
+    
+    // Set up random number generator with final seed
+    std::mt19937 rng(final_seed);
 
     // prepare output dir
     std::string output_dir;
@@ -587,28 +601,18 @@ int main(int argc, char *argv[]) {
               << std::endl;
 
     // number of data samples
-    const int num_iterations =
-        json_params["iterations"]; // Change this to desired number of images
+    const int num_iterations = args.num_iterations;
 
-    if (args.start_iteration >= num_iterations) {
-        std::cout << "Starting iteration (" << args.start_iteration
-                  << ") is >= total iterations (" << num_iterations
-                  << "). Nothing to do." << std::endl;
-        return 0;
-    }
-    if (args.start_iteration > 0) {
-        std::cout << "Resuming from iteration " << args.start_iteration << std::endl;
-    }
-
-    auto plots = json_params["plots"];
+    auto field = json_params["field"];
     // Parse generation mode
     GenerationMode mode = GenerationMode::UNKNOWN;
-    if (plots.contains("mode") && plots["mode"].is_string()) {
-        mode = parseGenerationMode(plots["mode"].get<std::string>());
+    if (field.contains("mode") && field["mode"].is_string()) {
+        mode = parseGenerationMode(field["mode"].get<std::string>());
     }
 
     // Declare context
     Context context;
+    context.seedRandomGenerator(final_seed);
     // Delcare LeafOptics, RadiationModel, and PlantArchitecture
     LeafOptics leafoptics(&context);
     RadiationModel radiation(&context);
@@ -622,34 +626,45 @@ int main(int argc, char *argv[]) {
         filename_stream << output_name << "_" << std::setw(4) << std::setfill('0') << i;
         std::string filename = filename_stream.str();
 
+        // Notes:
         // Recursively add "sampled" values to all parameters
+        // But the problem here is some keys need to be sampled, but some are already determined
+        // Final json will only have determined value without min, max, sampling, sampled keys
+        // Another problem is it don't force the types, such as float and uint
+        // Also num columns vs num beds, numb rows are not consistent
+        // plant architecture initialize need to be moved, like auto or manual
+        // ground also need to be moved
+        // Also manual and auto config are confusing. The final output will only have determied 'crops'
+        // In auto mode, use auto config to geneate plots and remove the config
+        // In manual mode, use the predefined plots 
+        // If double row plant thing in auto mode, it will double the nuber ofplants
+        // Changed the field size to populate (or cover) all the plants
+        // Changes FOV to cover entire field => Actually FOV is pre-calculated from python
+        // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
+        // auto_config will be deleted when pythpn geneates it
+        // Ran
         sampled_params = sampleParams(json_params, rng);
 
-        // save sampled parameters
-        std::string params_filename = output_dir + "/" + filename + "_params.json";
-        std::ofstream params_file(params_filename);
-        params_file << std::scientific << std::setprecision(4) << sampled_params << std::endl;
-        params_file.close();
+        // Save the seed value to sampled_params
+        sampled_params["seed"] = final_seed;
 
         // Create multiple plots in a grid pattern
         std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
-        auto plot_cfg = sampled_params["plots"];
-        auto pa_init = sampled_params["plantarchitecture"]["initialize"];
         if (mode == GenerationMode::AUTO) {
             // Auto plot generation - Earl
-            init_plant_architecture(plantarchitecture, context, sampled_params);
-
+            init_plant_architecture(plantarchitecture, sampled_params);
+            auto auto_cfg = sampled_params["field"]["auto_config"];
             // Calculate grid positioning to center all plots
-            int num_beds = plot_cfg["num_beds"]["sampled"].get<int>();
-            int num_rows = plot_cfg["num_rows"]["sampled"].get<int>();
-            float bed_spacing_x =
-                plot_cfg["bed_spacing_x"]["sampled"].get<float>();
-            float bed_spacing_y =
-                plot_cfg["bed_spacing_y"]["sampled"].get<float>();
-            float total_bed_width = (num_beds - 1) * bed_spacing_x;
-            float total_bed_height = (num_rows - 1) * bed_spacing_y;
-            float start_x = -total_bed_width / 2.0f;
-            float start_y = -total_bed_height / 2.0f;
+            int num_beds = auto_cfg["num_beds"].get<int>();
+            int num_rows = auto_cfg["num_rows"].get<int>();
+            float plot_spacing_x =
+                auto_cfg["plot_spacing_x"].get<float>();
+            float plot_spacing_y =
+                auto_cfg["plot_spacing_y"].get<float>();
+            float total_plot_width = (num_beds - 1) * plot_spacing_x;
+            float total_plot_height = (num_rows - 1) * plot_spacing_y;
+            float start_x = -total_plot_width / 2.0f;
+            float start_y = -total_plot_height / 2.0f;
 
             std::cout << "Creating " << num_beds << "x"
                       << num_rows << " plot grid..." << std::endl;
@@ -658,16 +673,16 @@ int main(int argc, char *argv[]) {
             for (int row = 0; row < num_rows; ++row) {
                 for (int bed = 0; bed < num_beds; ++bed) {
                     // Calculate position for this plot
-                    float plot_x = start_x + bed * bed_spacing_x;
-                    float plot_y = start_y + row * bed_spacing_y;
+                    float plot_x = start_x + bed * plot_spacing_x;
+                    float plot_y = start_y + row * plot_spacing_y;
 
                     std::vector<uint> plot_plant_IDs =
                         plantarchitecture.buildPlantCanopyFromLibrary(
                             make_vec3(plot_x, plot_y, 0),
-                            make_vec2(pa_init["plant_spacing_x"]["sampled"],
-                                      pa_init["plant_spacing_y"]["sampled"]),
-                            make_int2(pa_init["num_columns"]["sampled"],
-                                      pa_init["plant_count"]["sampled"]),
+                            make_vec2(auto_cfg["plant_spacing_x"],
+                                      auto_cfg["plant_spacing_y"]),
+                            make_int2(auto_cfg["planting_rows"],
+                                      auto_cfg["plant_count"]),
                             0);
 
                     // Add to the aging collection
@@ -676,46 +691,53 @@ int main(int argc, char *argv[]) {
                                          plot_plant_IDs.end());
                 }
             }
-            
+            // Add num_beds and num_rows to sampled_params["field"]
+            sampled_params["field"]["num_beds"] = sampled_params["field"]["auto_config"]["num_beds"];
+            sampled_params["field"]["num_rows"] = sampled_params["field"]["auto_config"]["num_rows"];
         } else if (mode == GenerationMode::MANUAL) {
             // Manual plot generation - Heesup
-            int num_crops = 0;
-            if (plot_cfg.contains("crops") && plot_cfg["crops"].is_array()) {
-                num_crops = plot_cfg["crops"].size();
+            float plot_width = sampled_params["field"]["plot_shape"]["plot_width"];
+            float plot_length = sampled_params["field"]["plot_shape"]["plot_length"];
+            // NEED TO UPDATE HEARE - There is no more PLOT, plants only exist
+            int num_beds = 0;
+            int num_rows = 0;
+            int num_plants = 0;
+            auto plants = sampled_params["field"]["plants"];
+            if (sampled_params["field"].contains("plants") 
+                && sampled_params["field"]["plants"].is_array()) {
+                num_plants = sampled_params["field"]["plants"].size();
             }
 
-            float bed_width = sampled_params["plots"]["bed_width"];
-            float bed_length = sampled_params["plots"]["bed_length"];
+            // Get crop type and convert to lowercase for plant library
+            for (int j = 0; j < num_plants; j++) {
+                int bed = plants[j]["bed"];
+                int row = plants[j]["row"];
 
-            for (int j = 0; j < num_crops; j++) {
+                num_beds = std::max(bed, num_beds);
+                num_rows = std::max(row, num_rows);
+
                 // Select the specific crop
-                json selected_crop = sampled_params["plots"]["crops"][j];
-
-                // Get crop type and convert to lowercase for plant library
-                std::string crop_type = selected_crop["crop_type"].get<std::string>();
+                json selected_crop = plants[j];
                 
-                // override plant type
-                sampled_params["plant"] = crop_type;
-                init_plant_architecture(plantarchitecture, context, sampled_params);
+                // params.json only have single plant type within plot for now
+                init_plant_architecture(plantarchitecture, sampled_params);
                 
                 // plant count and age can be changed here
                 vec3 origin(0, 0, 0);
-                int bed = selected_crop["bed"];
-                int row = selected_crop["row"];
+
                 float X = selected_crop["x"];
                 float Y = selected_crop["y"];
-                origin.x = bed * bed_width;
-                origin.y = row * bed_length;
+                origin.x = (bed-1) * plot_width;
+                origin.y = (row-1) * plot_length;
                 // float Z = config["crops"][i]["Z"].as<float>();
                 vec3 plant_origin = origin + make_vec3(X, Y, 0);
                 
-
-
                 // Check if xml path is provided and valid
                 if (selected_crop.contains("xml") && 
                     selected_crop["xml"].is_string() && 
                     !selected_crop["xml"].get<std::string>().empty()) {
                     // Build plant from XML file (already aged)
+                    // It will not use plant origin. It will use base position from the XML
                     std::string xml_path = selected_crop["xml"].get<std::string>();
                     std::vector<uint> plot_plant_IDs;
                     plot_plant_IDs = plantarchitecture.readPlantStructureXML(xml_path, 0);
@@ -730,11 +752,29 @@ int main(int argc, char *argv[]) {
                     std::cout << "Generated plant from library (ID:" << plantID << ")" << std::endl;
                 }
             }
+            
+            // Add num_beds and num_rows to sampled_params["field"]
+            sampled_params["field"]["num_beds"] = num_beds;
+            sampled_params["field"]["num_rows"] = num_rows;
         } else {
             std::cout << "[WARN] plots mode is not defined or invalid!"
                       << std::endl;
             return 0;
         }
+
+        // Remove auto_config key in manual mode before saving
+        if (mode == GenerationMode::MANUAL && sampled_params.contains("field") && 
+            sampled_params["field"].contains("auto_config")) {
+            sampled_params["field"].erase("auto_config");
+        }
+
+        // save sampled parameters
+        std::string params_filename = output_dir + "/" + filename + "_params.json";
+        std::ofstream params_file(params_filename);
+        // params_file << std::scientific << std::setprecision(4) << sampled_params << std::endl;
+        // params_file.close();
+        params_file << std::setw(4) << sampled_params << std::endl;
+        params_file.close();
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
@@ -743,7 +783,7 @@ int main(int argc, char *argv[]) {
 
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
-        if (sampled_params["ground"]["use_obj_ground"].get<bool>()) {
+        if (sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>()) {
             //UUIDs_ground = createObjGround(context, sampled_params);
             UUIDs_ground = make_field(context, sampled_params);
             DEBUG_PRINT("OBJ ground created");
@@ -752,10 +792,11 @@ int main(int argc, char *argv[]) {
         } else {
             
             // Calculate pixel size on ground based on camera FOV and resolution from params
-            float camera_height = sampled_params["cameraproperties"]["camera_height"]["sampled"].get<float>();
-            float HFOV = sampled_params["cameraproperties"]["HFOV"]["sampled"].get<float>();
-            int camera_res_x = sampled_params["cameraproperties"]["camera_resolution_x"]["sampled"].get<int>();
-            int camera_res_y = sampled_params["cameraproperties"]["camera_resolution_y"]["sampled"].get<int>();
+            auto cam_prop = sampled_params["cameraproperties"];
+            float camera_height = cam_prop["camera_height"].get<float>();
+            float HFOV = cam_prop["HFOV"].get<float>();
+            int camera_res_x = cam_prop["camera_resolution_x"].get<int>();
+            int camera_res_y = cam_prop["camera_resolution_y"].get<int>();
             
             float HFOV_rad = deg2rad(HFOV);
             float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
@@ -765,11 +806,14 @@ int main(int argc, char *argv[]) {
             float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
             float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
             
+#if 0
             // load dirt texture with fixed size (original method)
-            //float ground_x = sampled_params["ground"]["size_x"]["sampled"];
-            //float ground_y = sampled_params["ground"]["size_y"]["sampled"];
+            float ground_x = sampled_params["field"]["plot_shape"]["size_x"];
+            float ground_y = sampled_params["field"]["plot_shape"]["size_y"];
+#else
             float ground_x = ground_width_visible;
             float ground_y = ground_height_visible;
+#endif
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
             helios::vec2 field_size = make_vec2(ground_x, ground_y);
@@ -801,10 +845,8 @@ int main(int argc, char *argv[]) {
                     std::cout << "  Subdivision (clamped): " << clamped_subdiv_x << " x " << clamped_subdiv_y << std::endl;
                 }
             }
-
             // Keep texture repeat tied to visual tiling
             int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
-
             UUIDs_ground = context.addTile(tile_center, field_size,
                                            make_SphericalCoord(0, 0),
                                            make_int2(clamped_subdiv_x, clamped_subdiv_y),
@@ -814,7 +856,9 @@ int main(int argc, char *argv[]) {
 
         // Age only plants that were built from library (not from XML)
         if (!plant_IDs_aging.empty()) {
-            float plant_age = static_cast<int>(pa_init["plant_age"]["sampled"]);
+            // plants are planted in a single day -> Age all together
+            // Therefore there is no plant_age in plants element
+            float plant_age = static_cast<int>(sampled_params["field"]["plant_age"]);
             if (plant_age > 0) {
                 plantarchitecture.advanceTime(plant_IDs_aging, plant_age);
                 std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << plant_age
@@ -841,46 +885,46 @@ int main(int argc, char *argv[]) {
             
             // Add XML file paths and plant locations to sampled_params and re-save
             if (!xml_file_paths.empty()) {
-                if (mode == GenerationMode::MANUAL && sampled_params["plots"].contains("crops") && 
-                    sampled_params["plots"]["crops"].is_array()) {
+                if (mode == GenerationMode::MANUAL && sampled_params["field"].contains("plants") 
+                    && sampled_params["field"]["plants"].is_array()) {
                     // For manual mode, add xml path to each crop
-                    for (size_t j = 0; j < xml_file_paths.size() && j < sampled_params["plots"]["crops"].size(); j++) {
-                        sampled_params["plots"]["crops"][j]["xml"] = xml_file_paths[j];
+                    int num_plants = sampled_params["field"]["plants"].size();
+                    for (size_t j = 0; j < xml_file_paths.size() && j < num_plants; j++) {
+                        sampled_params["field"]["plants"][j]["xml"] = xml_file_paths[j];
                     }
                 } else if (mode == GenerationMode::AUTO) {
                     // For auto mode, create crops array with position and XML data
                     json crops_array = json::array();
-                    
+                    auto auto_config = sampled_params["field"]["auto_config"];
                     // Get grid parameters used during generation
-                    int num_beds = plot_cfg["num_beds"]["sampled"].get<int>();
-                    int num_rows = plot_cfg["num_rows"]["sampled"].get<int>();
-                    float bed_spacing_x = plot_cfg["bed_spacing_x"]["sampled"].get<float>();
-                    float bed_spacing_y = plot_cfg["bed_spacing_y"]["sampled"].get<float>();
-                    float total_bed_width = (num_beds - 1) * bed_spacing_x;
-                    float total_bed_height = (num_rows - 1) * bed_spacing_y;
-                    float start_x = -total_bed_width / 2.0f;
-                    float start_y = -total_bed_height / 2.0f;
+                    int num_beds = auto_config["num_beds"].get<int>();
+                    int num_rows = auto_config["num_rows"].get<int>();
+                    float plot_spacing_x = auto_config["plot_spacing_x"].get<float>();
+                    float plot_spacing_y = auto_config["plot_spacing_y"].get<float>();
+                    float total_plot_width = (num_beds - 1) * plot_spacing_x;
+                    float total_plot_height = (num_rows - 1) * plot_spacing_y;
+                    float start_x = -total_plot_width / 2.0f;
+                    float start_y = -total_plot_height / 2.0f;
                     
                     for (size_t j = 0; j < xml_file_paths.size() && j < UUIDs_plants.size(); j++) {
                         uint plantID = UUIDs_plants[j];
                         vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
                         
                         // Calculate which bed and row this plant belongs to based on its position
-                        // The plot center positions were: plot_x = start_x + bed * bed_spacing_x
-                        //                                plot_y = start_y + row * bed_spacing_y
-                        int bed = static_cast<int>(std::round((plant_position.x - start_x) / bed_spacing_x));
-                        int row = static_cast<int>(std::round((plant_position.y - start_y) / bed_spacing_y));
+                        // The plot center positions were: plot_x = start_x + bed * plot_spacing_x
+                        //                                plot_y = start_y + row * plot_spacing_y
+                        int bed = static_cast<int>(std::round((plant_position.x - start_x) / plot_spacing_x));
+                        int row = static_cast<int>(std::round((plant_position.y - start_y) / plot_spacing_y));
                         
                         // Calculate the plot center for this bed/row
-                        float plot_center_x = start_x + bed * bed_spacing_x;
-                        float plot_center_y = start_y + row * bed_spacing_y;
+                        float plot_center_x = start_x + bed * plot_spacing_x;
+                        float plot_center_y = start_y + row * plot_spacing_y;
                         
                         // Calculate position relative to plot center
                         float x_relative = plant_position.x - plot_center_x;
                         float y_relative = plant_position.y - plot_center_y;
                         
                         json crop_info;
-                        crop_info["crop_type"] = sampled_params["plant"];
                         crop_info["bed"] = bed;
                         crop_info["row"] = row;
                         crop_info["x"] = x_relative;
@@ -890,7 +934,7 @@ int main(int argc, char *argv[]) {
                         crops_array.push_back(crop_info);
                     }
                     
-                    sampled_params["plots"]["crops"] = crops_array;
+                    sampled_params["field"]["plants"] = crops_array;
                 } else {
                     // Fallback: add as a top-level array
                     sampled_params["xml_files"] = xml_file_paths;
@@ -1004,7 +1048,6 @@ int main(int argc, char *argv[]) {
         }
 
 
-
         // Run radiation model by default true
         if (args.run_radiation) {
             printSystemMemoryUsage("Before radiation init");
@@ -1033,7 +1076,7 @@ int main(int argc, char *argv[]) {
             printGPUMemoryUsage("After runBand");
 
             // process image using standard pipeline
-            radiation.applyImageProcessingPipeline(cameralabel, "red", "green",
+            radiation.applyCameraImageCorrections(cameralabel, "red", "green",
                                                    "blue");
 
             // save rendered RGB image with custom filename

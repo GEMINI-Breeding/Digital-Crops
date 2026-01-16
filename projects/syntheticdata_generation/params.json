@@ -1,125 +1,197 @@
 {
-  "output_directory": "output",
-
-  "iterations": 1,
-
-  "plant": "cowpea",
-
-  "plots": {
-    "mode": "manual",
+  "seed": 42,
+  "field": {
+    "year": 2025,
     "location": "Davis",
-    "year": 2023,
-    "crop_types": ["cowpea", "bean", "sorghum"],
-    "num_beds": { "sampling": "uniform", "min": 1, "max": 1 },
-    "num_rows": { "sampling": "uniform", "min": 1, "max": 1 },
-    "bed_spacing_x": { "sampling": "constant", "value": 1.0 },
-    "bed_spacing_y": { "sampling": "constant", "value": 1.0 },
-    "bed_height": 0.2,
-    "bed_width": 3.0,
-    "bed_length": 6.0,
-    "soil_color": [0.61, 0.58, 0.55],
-    "crops": [
+    "plant_type": "cowpea",
+    "plant_age": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 10, "max": 30 }
+        }
+    },
+    "plot_shape": {
+      "plot_height": 0.2,
+      "plot_width": 3.0,
+      "plot_length": 6.0,
+      "plot_heading": 90.0,
+      "soil_color": [0.61, 0.58, 0.55],
+      "use_obj_ground": true,
+      "obj_file_path": "../../../obj/dirt_rocks.obj"
+    },
+    "mode": "manual",
+    "auto_config": {
+      "num_beds": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 1, "max": 1 }
+        }
+      },
+      "num_rows": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 1, "max": 1 }
+        }
+      },
+      "plot_spacing_x": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 1.0, "max": 1.0 }
+        }
+      },
+      "plot_spacing_y": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 1.0, "max": 1.0 }
+        }
+      },
+      "plant_spacing_x": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 0.5, "max": 0.75 }
+        }
+      },
+      "plant_spacing_y": { 
+        "distribution": {
+          "type": "uniform", 
+          "params": {"min": 0.5, "max": 1.0 }
+        }
+      },
+      "plant_count": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 5, "max": 7 }
+        }
+      },
+      "planting_rows": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 1, "max": 2 }
+        }
+      }
+    },
+    "plants":[
       {
-        "crop_type": "cowpea",
-        "bed": 0,
-        "row": 0,
-        "x": 0,
-        "y": 0,
-        "xml": ""
+        "bed": 1,"row": 1, "x": 0, "y": 0, "xml": ""
       },
       {
-        "crop_type": "cowpea",
-        "bed": 0,
-        "row": 0,
-        "x": 0,
-        "y": 0.75,
-        "xml": ""
+        "bed": 1,"row": 1, "x": 0, "y": 0.75, "xml": ""
       },
       {
-        "crop_type": "cowpea",
-        "bed": 0,
-        "row": 0,
-        "x": 0,
-        "y": 1.5,
-        "xml": ""
+        "bed": 1,"row": 1, "x": 0, "y": 1.5, "xml": ""
       },
       {
-        "crop_type": "cowpea",
-        "bed": 0,
-        "row": 0,
-        "x": 0,
-        "y": -0.75,
-        "xml": ""
+        "bed": 1,"row": 1, "x": 0, "y": -0.75, "xml": ""
       },
       {
-        "crop_type": "cowpea",
-        "bed": 0,
-        "row": 0,
-        "x": 0,
-        "y": -1.5,
-        "xml": ""
+        "bed": 1,"row": 1, "x": 0, "y": -1.5, "xml": ""
       }
     ]
   },
-
-  "ground": {
-
-    "size_x": { "sampling": "constant", "value": 2.5 },
-    "size_y": { "sampling": "constant", "value": 5.0 },
-
-    "use_obj_ground": true,
-    "obj_file_path": "../../../obj/dirt_rocks.obj",
-    "ground_scale": { "sampling": "constant", "value": 0.1 }
-
-  },
-
   "sun_position": {
-
-    "elevation_degrees": { "sampling": "uniform", "min": 0, "max": 90 },
-    "azimuth_degrees": { "sampling": "uniform", "min": 0, "max": 360 },
+    "elevation_degrees": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.0, "max": 90.0 }
+        }
+      },
+    "azimuth_degrees": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.0, "max": 360.0 }
+        }
+      },
     "shadow": true
   },
-
   "plantarchitecture": {
-
-    "initialize": {
-      "plant_count": { "sampling": "uniform", "min": 5.0, "max": 7.0 },
-      "plant_age": { "sampling": "uniform", "min": 100.0, "max": 100.0 },
-      "plant_spacing_x": { "sampling": "uniform", "min": 0.5, "max": 0.75 },
-      "plant_spacing_y": { "sampling": "uniform", "min": 0.5, "max": 1.0 },
-      "num_columns": { "sampling": "uniform", "min": 1, "max": 2 }
-    },
-
     "phytomer_parameters": {
-      "leaf_pitch": { "sampling": "uniform", "min": -90.0, "max": 90.0 }
+      "leaf_pitch": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": -90.0, "max": 90.0 }
+        }
+      }
     },
-
-    "flower_bud_break_probability": { "sampling": "uniform", "min": 0, "max": 0.8 }
-    
+    "flower_bud_break_probability": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.0, "max": 0.8 }
+        }
+      } 
   },
 
   "cameraproperties": {
-    
-    "camera_height": { "sampling": "uniform", "min": 1.5, "max": 1.5 },
-    "focal_plane_distance_difference": { "sampling": "uniform", "min": 0.5, "max": 0.5 },
-    "lens_diameter": { "sampling": "constant", "value": 0.0028 },
-    "HFOV": { "sampling": "constant", "value": 120.0 },
-    "camera_resolution_x": { "sampling": "constant", "value": 1920 },
-    "camera_resolution_y": { "sampling": "constant", "value": 1080 },
-
+    "camera_height": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 1.5, "max": 1.5 }
+        }
+      },
+    "focal_plane_distance_difference": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.5, "max": 0.5 }
+        }
+      }, 
+    "lens_diameter": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.0028, "max": 0.0028 }
+        }
+      }, 
+    "HFOV": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 120.0 }
+        }
+      }, 
+    "camera_resolution_x": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 1920 }
+        }
+      },
+    "camera_resolution_y": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 1080 }
+        }
+      },
     "camera_positioning": {
-      "distance_from_center": { "sampling": "uniform", "min": 0.01, "max": 0.01 },
+      "distance_from_center": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.01, "max": 0.01 }
+        }
+      }, 
       "center_plants": false,
-      "azimuth_angle": { "sampling": "uniform", "min": 0.0, "max": 0.0 },
-      "lookat_offset_x": { "sampling": "constant", "value": 0.0 },
-      "lookat_offset_y": { "sampling": "constant", "value": 0.0 },
-      "lookat_offset_z": { "sampling": "constant", "value": 0.0 }
+      "azimuth_angle": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 0.0, "max": 0.0 }
+        }
+      },
+      "lookat_offset_x": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 0.0 }
+        }
+      },
+      "lookat_offset_y": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 0.0 }
+        }
+      },
+      "lookat_offset_z": {
+        "distribution": {
+          "type": "constant",
+          "params": { "value": 0.0 }
+        }
+      }
     }
-
   },
-
   "radiationmodel": {
-
     "colorboard": "plugins/radiation/spectral_data/color_board/DGK_DKK_colorboard.xml",
     "bandlabels": ["red", "green", "blue"],
     "cameralabel": "camera",
@@ -128,23 +200,22 @@
       "reflectivity": "bean_leaf_reflectivity_0000",
       "transmissivity": "bean_leaf_transmissivity_0000"
     },
-
     "soil_surface_spectral_data": {
       "file": "plugins/radiation/spectral_data/soil_surface_spectral_library.xml",
       "reflectivity": "soil_reflectivity_0000"
     },
-
     "camera_spectral_data": {
       "file": "plugins/radiation/spectral_data/camera_spectral_library.xml",
       "camera_type": "Basler_acA2500-20gc"
     }
-
   },
 
   "leafoptics": {
-
-    "chlorophyll_content": { "sampling": "uniform", "min": 1.0, "max": 60.0 }
-
+    "chlorophyll_content": {
+        "distribution": {
+          "type": "uniform",
+          "params": { "min": 1.0, "max": 60.0 }
+        }
+      }
   }
-
 }

@@ -25,40 +25,71 @@ json loadParametersFromJson(const std::string& filename) {
     return params;
 }
 
-// Recursively find all parameters with "sampling" key and add "sampled" value
+// Template function to sample from distribution based on type
+template<typename T>
+T sampleFromDistribution(const std::string& distribution_type, 
+                         const json& params, 
+                         std::mt19937& rng) {
+    if (distribution_type == "constant") {
+        return static_cast<T>(params["value"]);
+    }
+    else if (distribution_type == "uniform") {
+        T min_val = params["min"];
+        T max_val = params["max"];
+        if constexpr (std::is_integral_v<T>) {
+            std::uniform_int_distribution<T> dist(min_val, max_val);
+            return dist(rng);
+        } else {
+            std::uniform_real_distribution<T> dist(min_val, max_val);
+            return dist(rng);
+        }
+    }
+    else if (distribution_type == "normal") {
+        float mean = params["mean"];
+        float std_dev = params["std"];
+        std::normal_distribution<float> dist(mean, std_dev);
+        return static_cast<T>(dist(rng));
+    }
+    else if (distribution_type == "categorical") {
+        auto values = params["values"];
+        if (values.is_array() && !values.empty()) {
+            std::uniform_int_distribution<size_t> dist(0, values.size() - 1);
+            size_t index = dist(rng);
+            return static_cast<T>(values[index]);
+        }
+    }
+    
+    // Fallback
+    return T{};
+}
+
+// Recursively find all parameters with "distribution" key and replace with sampled value
 void addSampledValues(json& j, std::mt19937& rng) {
     if (j.is_object()) {
-        // Check if this object has a "sampling" key
-        if (j.contains("sampling")) {
-            // Skip sampling if "sampled" key already exists
-            if (j.contains("sampled")) {
-                return;
+        // Check if this object has a "distribution" key
+        if (j.contains("distribution")) {            
+            auto j_distribution = j["distribution"];
+            auto j_distribution_params = j_distribution["params"];
+            
+            std::string distribution_type = j_distribution["type"];
+            
+            // Type inference: check if parameters suggest integer or float
+            bool is_integer = false;
+            if (j_distribution_params.contains("min") && j_distribution_params.contains("max")) {
+                is_integer = j_distribution_params["min"].is_number_integer() && 
+                            j_distribution_params["max"].is_number_integer();
+            } else if (j_distribution_params.contains("value")) {
+                is_integer = j_distribution_params["value"].is_number_integer();
             }
             
-            std::string sampling = j["sampling"];
-            
-            // Determine the type and sample accordingly
-            if (sampling == "constant") {
-                j["sampled"] = j["value"];
-            }
-            else if (sampling == "uniform") {
-                // Try to determine if it's int or float based on the values
-                if (j["min"].is_number_integer() && j["max"].is_number_integer()) {
-                    j["sampled"] = sampleValue<int>(j, rng);
-                } else {
-                    j["sampled"] = sampleValue<float>(j, rng);
-                }
-            }
-            else if (sampling == "normal") {
-                j["sampled"] = sampleValue<float>(j, rng);
-            }
-            else if (sampling == "discrete") {
-                auto values = j["values"];
-                if (values.is_array() && !values.empty()) {
-                    std::uniform_int_distribution<size_t> dist(0, values.size() - 1);
-                    size_t index = dist(rng);
-                    j["sampled"] = values[index];
-                }
+            // Sample based on inferred type
+            if (is_integer) {
+                j = sampleFromDistribution<int>(distribution_type, j_distribution_params, rng);
+            } else {
+                float sampled_value = sampleFromDistribution<float>(distribution_type, j_distribution_params, rng);
+                // Round to 4 decimal places using double precision to avoid artifacts
+                double rounded_value = std::round(static_cast<double>(sampled_value) * 10000.0) / 10000.0;
+                j = rounded_value;
             }
         } else {
             // Recursively process all nested objects
@@ -75,7 +106,7 @@ void addSampledValues(json& j, std::mt19937& rng) {
     }
 }
 
-// Recursively find all parameters with "sampling" key and add "sampled" value
+// Sample all parameters in JSON structure
 json sampleParams(json& j_input, std::mt19937& rng) {
     // Create a copy of the json
     json j = j_input;
@@ -87,27 +118,6 @@ json sampleParams(json& j_input, std::mt19937& rng) {
     return j;
 }
 
-// Sample parameters from JSON by adding "sampled" values to the original structure
-json sampleParametersToJson(int crop_index, const json& json_params, std::mt19937& rng) {
-    // Create a copy of the params for this specific crop
-    json params_copy = json_params;
-    
-    // Select the specific crop
-    if (params_copy.contains("plants") && 
-        params_copy["plants"].contains("crops") && 
-        params_copy["plants"]["crops"].is_array() &&
-        crop_index < params_copy["plants"]["crops"].size()) {
-        
-        // Keep only the selected crop
-        json selected_crop = params_copy["plants"]["crops"][crop_index];
-        params_copy["plants"]["crops"] = json::array({selected_crop});
-    }
-    
-    // Recursively add sampled values to all parameters with "sampling" key
-    addSampledValues(params_copy, rng);
-    
-    return params_copy;
-}
 
 // Function to compute bounding box and extent for a vector of UUIDs
 void getBoundingBoxAndExtent(helios::Context& context, const std::vector<uint>& UUIDs, 
