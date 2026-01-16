@@ -161,6 +161,85 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     return setup;
 }
 
+void update_leafoptics(Context &context,
+                        PlantArchitecture &plantarchitecture,
+                        LeafOptics& leafoptics,
+                        json sampled_params) {
+    
+    // Initialize leaf optics properties with fitted parameters
+    LeafOpticsProperties leafopticsprops;
+    leafoptics.getPropertiesFromLibrary("cowpea", leafopticsprops);
+    leafopticsprops.numberlayers = sampled_params["leafoptics"].value("number_layers", 1.5824);
+    leafopticsprops.chlorophyllcontent = sampled_params["leafoptics"].value("chlorophyll_content", 37.4129);
+    leafopticsprops.carotenoidcontent = sampled_params["leafoptics"].value("carotenoid_content", 12.2658);
+    leafopticsprops.anthocyancontent = sampled_params["leafoptics"].value("anthocyan_content", 0.958622);
+    leafopticsprops.brownpigments = sampled_params["leafoptics"].value("brown_pigments", 0.01339);
+    leafopticsprops.watermass = sampled_params["leafoptics"].value("water_mass", 0.01346);
+    leafopticsprops.drymass = sampled_params["leafoptics"].value("dry_mass", 0.00315556);
+    leafopticsprops.protein = sampled_params["leafoptics"].value("protein", 0.0);
+    leafopticsprops.carbonconstituents = sampled_params["leafoptics"].value("carbon_constituents", 0.0);
+
+
+    // Run PROSPECT model to generate leaf_reflectivity_prospect and leaf_transmissivity_prospect
+    leafoptics.run(leafopticsprops, "cowpea");
+
+    if (g_debug_mode) std::cout << "[DEBUG] Processing individual plants..." << std::endl;
+    // Get plantarchitecture plant ids
+    std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
+    for (uint &id : plant_ids) {
+
+        // label plants
+        std::vector<uint> single_plant_UUIDs = plantarchitecture.getAllPlantObjectIDs(id);
+        std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(single_plant_UUIDs);
+        context.setPrimitiveData(uuids_plant, "plant", id);
+
+        // Get flower obj id in plantarchitecture
+        std::vector<uint> flower_obj_ids =
+            plantarchitecture.getPlantFlowerObjectIDs(id);
+
+        for (uint &flower_obj_id : flower_obj_ids) {
+            std::vector<uint> uuids_flower =
+                context.getObjectPrimitiveUUIDs(flower_obj_id);
+
+            // check if flower is open or closed based on object data
+            if (context.doesObjectDataExist(flower_obj_id, "closedflowerID")) {
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
+                                         "reflectivity_flower_cowpea_closed");
+            } else if (context.doesObjectDataExist(flower_obj_id, "openflowerID")) {
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
+                                         "reflectivity_flower_cowpea_open"); 
+            } else {
+                // Default open flower
+                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
+                                         "reflectivity_flower_cowpea_closed");
+            }
+            
+            // label flowers
+            context.setPrimitiveData(uuids_flower, "flower", flower_obj_id);
+        }
+
+        // Get pod obj id in plantarchitecture
+        std::vector<uint> pod_obj_ids =
+            plantarchitecture.getPlantFruitObjectIDs(id);
+        for (uint& pod_obj_id : pod_obj_ids) {
+            std::vector<uint> uuids_pod =
+            context.getObjectPrimitiveUUIDs(pod_obj_id);
+            // pod coloring
+            context.setPrimitiveData(uuids_pod, "reflectivity_spectrum",
+                                         "reflectivity_pod_cowpea"); 
+            // pod labeling
+            context.setPrimitiveData(uuids_pod, "pod", pod_obj_id);
+        }
+
+        // Update leaf optical properties using PROSPECT-generated spectra
+        std::vector<uint> leaf_obj_ids = plantarchitecture.getPlantLeafObjectIDs(id);
+        std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(leaf_obj_ids);
+        context.setPrimitiveData(uuids_leaf, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
+        context.setPrimitiveData(uuids_leaf, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
+        context.setPrimitiveData(uuids_leaf, "specular_exponent", 10.f);
+    }
+}
+
 
 void init_radiation_model(Context &context,
                           RadiationModel &radiation,
@@ -226,75 +305,8 @@ void init_radiation_model(Context &context,
     context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
 
     // Specular reflection causes a surface to look "shiny"
-    context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
-    context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
-
-    
-    // Initialize leaf optics properties
-    LeafOpticsProperties leafopticsprops;
-    leafopticsprops.chlorophyllcontent =
-        sampled_params["leafoptics"]["chlorophyll_content"].get<int>();
-    
-    if (g_debug_mode) std::cout << "[DEBUG] Processing individual plants..." << std::endl;
-    // Get plantarchitecture plant ids
-    std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
-    for (uint &id : plant_ids) {
-
-        // label plants
-        std::vector<uint> single_plant_UUIDs = plantarchitecture.getAllPlantObjectIDs(id);
-        std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(single_plant_UUIDs);
-        context.setPrimitiveData(uuids_plant, "plant", id);
-
-        // Get flower obj id in plantarchitecture
-        std::vector<uint> flower_obj_ids =
-            plantarchitecture.getPlantFlowerObjectIDs(id);
-
-        for (uint &flower_obj_id : flower_obj_ids) {
-            std::vector<uint> uuids_flower =
-                context.getObjectPrimitiveUUIDs(flower_obj_id);
-
-            // check if flower is open or closed based on object data
-            if (context.doesObjectDataExist(flower_obj_id, "closedflowerID")) {
-                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
-                                         "reflectivity_flower_cowpea_closed");
-            } else if (context.doesObjectDataExist(flower_obj_id, "openflowerID")) {
-                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
-                                         "reflectivity_flower_cowpea_open"); 
-            } else {
-                // Default open flower
-                context.setPrimitiveData(uuids_flower, "reflectivity_spectrum",
-                                         "reflectivity_flower_cowpea_closed");
-            }
-            
-            // label flowers
-            context.setPrimitiveData(uuids_flower, "flower", flower_obj_id);
-        }
-
-        // Get pod obj id in plantarchitecture
-        std::vector<uint> pod_obj_ids =
-            plantarchitecture.getPlantFruitObjectIDs(id);
-        for (uint& pod_obj_id : pod_obj_ids) {
-            std::vector<uint> uuids_pod =
-            context.getObjectPrimitiveUUIDs(pod_obj_id);
-            // pod coloring
-            context.setPrimitiveData(uuids_pod, "reflectivity_spectrum",
-                                         "reflectivity_pod_cowpea"); 
-            // pod labeling
-            context.setPrimitiveData(uuids_pod, "pod", pod_obj_id);
-        }
-
-        // Update leaf optical properties
-        std::vector<uint> leaf_obj_ids =
-            plantarchitecture.getPlantLeafObjectIDs(id);
-        for (uint &leaf_obj_id : leaf_obj_ids) {
-            std::vector<uint> uuids_leaf =
-                context.getObjectPrimitiveUUIDs(leaf_obj_id);
-            leafoptics.run(uuids_leaf, leafopticsprops, "cowpea_leaf");
-            context.setPrimitiveData(uuids_leaf, "specular_exponent", 10.f);
-        }
-
-    }
-    
+    // context.setPrimitiveData(UUIDs_plants, "specular_exponent", 10.f);
+    // context.setPrimitiveData(UUIDs_ground, "specular_exponent", 10.f);
     if (g_debug_mode) std::cout << "[DEBUG] Adding sun and radiation bands..." << std::endl;
     // set up sun lighting
     uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
@@ -615,6 +627,7 @@ int main(int argc, char *argv[]) {
     context.seedRandomGenerator(final_seed);
     // Delcare LeafOptics, RadiationModel, and PlantArchitecture
     LeafOptics leafoptics(&context);
+    leafoptics.disableMessages();
     RadiationModel radiation(&context);
     PlantArchitecture plantarchitecture(&context);
     for (int i = 0; i < num_iterations; ++i) {
@@ -708,6 +721,9 @@ int main(int argc, char *argv[]) {
                 num_plants = sampled_params["field"]["plants"].size();
             }
 
+             // params.json only have single plant type within plot for now
+            init_plant_architecture(plantarchitecture, sampled_params);
+
             // Get crop type and convert to lowercase for plant library
             for (int j = 0; j < num_plants; j++) {
                 int bed = plants[j]["bed"];
@@ -719,8 +735,7 @@ int main(int argc, char *argv[]) {
                 // Select the specific crop
                 json selected_crop = plants[j];
                 
-                // params.json only have single plant type within plot for now
-                init_plant_architecture(plantarchitecture, sampled_params);
+
                 
                 // plant count and age can be changed here
                 vec3 origin(0, 0, 0);
@@ -811,8 +826,8 @@ int main(int argc, char *argv[]) {
             float ground_x = sampled_params["field"]["plot_shape"]["size_x"];
             float ground_y = sampled_params["field"]["plot_shape"]["size_y"];
 #else
-            float ground_x = ground_width_visible;
-            float ground_y = ground_height_visible;
+            float ground_x = ground_width_visible * 1.05; // 5 percent buffer
+            float ground_y = ground_height_visible * 1.05; // 5 percent buffer
 #endif
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
@@ -860,7 +875,12 @@ int main(int argc, char *argv[]) {
             // Therefore there is no plant_age in plants element
             float plant_age = static_cast<int>(sampled_params["field"]["plant_age"]);
             if (plant_age > 0) {
-                plantarchitecture.advanceTime(plant_IDs_aging, plant_age);
+                //plantarchitecture.advanceTime(plant_IDs_aging, plant_age);
+                int days_per_update = 2;
+                for(int day = 0; day < plant_age/days_per_update;day++){
+                    plantarchitecture.advanceTime(plant_IDs_aging, days_per_update);
+                    update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
+                }
                 std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << plant_age
                           << " days" << std::endl;
             }
