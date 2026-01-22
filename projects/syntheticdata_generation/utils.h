@@ -39,7 +39,7 @@ void getBoundingBoxAndExtent(helios::Context& context, const std::vector<unsigne
 // Function to rescale a set of UUIDs to a specific target extent
 void rescaleUUIDsToSize(helios::Context& context, const std::vector<unsigned int>& UUIDs, const helios::vec3& target_extent);
 
-
+double round_4digit(double value);
 // MIN and MAX macros
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

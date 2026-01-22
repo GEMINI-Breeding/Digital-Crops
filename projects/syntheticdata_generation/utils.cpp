@@ -11,6 +11,9 @@
 
 using namespace helios;
 
+double round_4digit(double value) {
+    return std::round(static_cast<double>(value) * 10000.0) / 10000.0;
+}
 
 
 // Function to load and parse JSON parameters
@@ -73,23 +76,42 @@ void addSampledValues(json& j, std::mt19937& rng) {
             
             std::string distribution_type = j_distribution["type"];
             
-            // Type inference: check if parameters suggest integer or float
-            bool is_integer = false;
-            if (j_distribution_params.contains("min") && j_distribution_params.contains("max")) {
-                is_integer = j_distribution_params["min"].is_number_integer() && 
-                            j_distribution_params["max"].is_number_integer();
-            } else if (j_distribution_params.contains("value")) {
-                is_integer = j_distribution_params["value"].is_number_integer();
-            }
-            
-            // Sample based on inferred type
-            if (is_integer) {
-                j = sampleFromDistribution<int>(distribution_type, j_distribution_params, rng);
+            // Handle categorical distribution separately (returns string)
+            if (distribution_type == "categorical") {
+                // Categorical uses "categories" key, not "values"
+                if (j_distribution_params.contains("categories")) {
+                    auto categories = j_distribution_params["categories"];
+                    if (categories.is_array() && !categories.empty()) {
+                        std::uniform_int_distribution<size_t> dist(0, categories.size() - 1);
+                        size_t index = dist(rng);
+                        j = categories[index];  // Assign the selected category string
+                    } else {
+                        // Empty categories array - set to empty string as fallback
+                        j = "";
+                    }
+                } else {
+                    // No categories key - set to empty string as fallback
+                    j = "";
+                }
             } else {
-                float sampled_value = sampleFromDistribution<float>(distribution_type, j_distribution_params, rng);
-                // Round to 4 decimal places using double precision to avoid artifacts
-                double rounded_value = std::round(static_cast<double>(sampled_value) * 10000.0) / 10000.0;
-                j = rounded_value;
+                // Type inference: check if parameters suggest integer or float
+                bool is_integer = false;
+                if (j_distribution_params.contains("min") && j_distribution_params.contains("max")) {
+                    is_integer = j_distribution_params["min"].is_number_integer() && 
+                                j_distribution_params["max"].is_number_integer();
+                } else if (j_distribution_params.contains("value")) {
+                    is_integer = j_distribution_params["value"].is_number_integer();
+                }
+                
+                // Sample based on inferred type
+                if (is_integer) {
+                    j = sampleFromDistribution<int>(distribution_type, j_distribution_params, rng);
+                } else {
+                    float sampled_value = sampleFromDistribution<float>(distribution_type, j_distribution_params, rng);
+                    // Round to 4 decimal places using double precision to avoid artifacts
+                    double rounded_value = round_4digit(sampled_value);
+                    j = rounded_value;
+                }
             }
         } else {
             // Recursively process all nested objects

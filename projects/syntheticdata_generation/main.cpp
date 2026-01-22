@@ -166,18 +166,20 @@ void update_leafoptics(Context &context,
                         LeafOptics& leafoptics,
                         json sampled_params) {
     
+    // Extract leaf specular exponent from JSON with default value
+    float leaf_specular = sampled_params["leafoptics"].value("specular_exponent", 2.0f);
+    
     // Get plantarchitecture plant ids
     std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
+
+    // Set default color for the plant
+    std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
+    context.setPrimitiveData(
+        UUIDs_plants, "reflectivity_spectrum","leaf_reflectivity_prospect");
+    context.setPrimitiveData(
+        UUIDs_plants, "transmissivity_spectrum","leaf_transmissivity_prospect");
+
     for (uint &id : plant_ids) {
-
-        // Update color
-        // // Set default color for whole plant
-        // std::vector<uint> UUIDs_plants = plantarchitecture.getAllUUIDs();
-        // context.setPrimitiveData(
-        //     UUIDs_plants, "reflectivity_spectrum","leaf_reflectivity_cowpea");
-        // context.setPrimitiveData(
-        //     UUIDs_plants, "transmissivity_spectrum","leaf_transmissivity_cowpea");
-
         // label plants
         std::vector<uint> single_plant_UUIDs = plantarchitecture.getAllPlantObjectIDs(id);
         std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(single_plant_UUIDs);
@@ -223,31 +225,31 @@ void update_leafoptics(Context &context,
         // Update peduncle optical properties using PROSPECT-generated spectra
         std::vector<uint> peduncle_obj_ids = plantarchitecture.getPlantPeduncleObjectIDs(id);
         std::vector<uint> uuids_peduncle = context.getObjectPrimitiveUUIDs(peduncle_obj_ids);
-        context.setPrimitiveData(uuids_peduncle, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
-        context.setPrimitiveData(uuids_peduncle, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
-        context.setPrimitiveData(uuids_peduncle, "specular_exponent", 2.0f);
+        context.setPrimitiveData(uuids_peduncle, "reflectivity_spectrum", "leaf_reflectivity_prospect");
+        context.setPrimitiveData(uuids_peduncle, "transmissivity_spectrum", "leaf_transmissivity_prospect");
+        context.setPrimitiveData(uuids_peduncle, "specular_exponent", leaf_specular);
 
     
         // Update internode optical properties using PROSPECT-generated spectra
         std::vector<uint> internode_obj_ids = plantarchitecture.getPlantInternodeObjectIDs(id);
         std::vector<uint> uuids_internode = context.getObjectPrimitiveUUIDs(internode_obj_ids);
-        context.setPrimitiveData(uuids_internode, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
-        context.setPrimitiveData(uuids_internode, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
-        context.setPrimitiveData(uuids_internode, "specular_exponent", 2.0f);
+        context.setPrimitiveData(uuids_internode, "reflectivity_spectrum", "leaf_reflectivity_prospect");
+        context.setPrimitiveData(uuids_internode, "transmissivity_spectrum", "leaf_transmissivity_prospect");
+        context.setPrimitiveData(uuids_internode, "specular_exponent", leaf_specular);
 
         // Update petiole optical properties using PROSPECT-generated spectra
         std::vector<uint> petiole_obj_ids = plantarchitecture.getPlantPetioleObjectIDs(id);
         std::vector<uint> uuids_petiole = context.getObjectPrimitiveUUIDs(petiole_obj_ids);
-        context.setPrimitiveData(uuids_petiole, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
-        context.setPrimitiveData(uuids_petiole, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
-        context.setPrimitiveData(uuids_petiole, "specular_exponent", 2.0f);
+        context.setPrimitiveData(uuids_petiole, "reflectivity_spectrum", "leaf_reflectivity_prospect");
+        context.setPrimitiveData(uuids_petiole, "transmissivity_spectrum", "leaf_transmissivity_prospect");
+        context.setPrimitiveData(uuids_petiole, "specular_exponent", leaf_specular);
 
         // Update leaf optical properties using PROSPECT-generated spectra
         std::vector<uint> leaf_obj_ids = plantarchitecture.getPlantLeafObjectIDs(id);
         std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(leaf_obj_ids);
-        context.setPrimitiveData(uuids_leaf, "reflectivity_spectrum", "leaf_reflectivity_cowpea");
-        context.setPrimitiveData(uuids_leaf, "transmissivity_spectrum", "leaf_transmissivity_cowpea");
-        context.setPrimitiveData(uuids_leaf, "specular_exponent", 2.0f);
+        context.setPrimitiveData(uuids_leaf, "reflectivity_spectrum", "leaf_reflectivity_prospect");
+        context.setPrimitiveData(uuids_leaf, "transmissivity_spectrum", "leaf_transmissivity_prospect");
+        context.setPrimitiveData(uuids_leaf, "specular_exponent", leaf_specular);
     }
 }
 
@@ -268,12 +270,32 @@ void init_spectral_data(Context &context,
     auto radiation_cfg = sampled_params["radiationmodel"];
     
     // Part 1: load color and reflectivity data from XML
-    context.loadXML(radiation_cfg["colorboard"].get<std::string>().c_str(),
-                    true);
-    context.loadXML(radiation_cfg["leaf_surface_spectral_data"]["file"]
-                        .get<std::string>().c_str(), true);
-    context.loadXML(radiation_cfg["soil_surface_spectral_data"]["file"]
-                        .get<std::string>().c_str(), true);
+    std::string colorboard_file = radiation_cfg.value(
+        "colorboard", "plugins/radiation/spectral_data/color_board/DGK_DKK_colorboard.xml");
+    context.loadXML(colorboard_file.c_str(), true);
+
+#if 0
+    // Load leaf surface spectral data with default value
+    std::string leaf_spectral_file;
+    if (radiation_cfg.contains("leaf_surface_spectral_data") && 
+        radiation_cfg["leaf_surface_spectral_data"].contains("file")) {
+        leaf_spectral_file = radiation_cfg["leaf_surface_spectral_data"]["file"].get<std::string>();
+    } else {
+        leaf_spectral_file = "plugins/radiation/spectral_data/leaf_surface_spectral_library.xml";
+    }
+    context.loadXML(leaf_spectral_file.c_str(), true);
+#endif
+
+    // Load soil surface spectral data with default value
+    std::string soil_spectral_file;
+    if (radiation_cfg.contains("soil_surface_spectral_data") && 
+        radiation_cfg["soil_surface_spectral_data"].contains("file")) {
+        soil_spectral_file = radiation_cfg["soil_surface_spectral_data"]["file"].get<std::string>();
+    } else {
+        soil_spectral_file = "plugins/radiation/spectral_data/soil_surface_spectral_library.xml";
+    }
+    context.loadXML(soil_spectral_file.c_str(), true);
+    
     context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
     context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
     context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
@@ -313,8 +335,9 @@ void init_spectral_data(Context &context,
                                  camera_setup.camera_lookat, camera_setup.cam_prop, 100);
 
     // set camera spectral response to simulate iPhone camera
-    context.loadXML(
-        "plugins/radiation/spectral_data/camera_spectral_library.xml", true);
+    std::string camera_spectral_file = radiation_cfg["camera_spectral_data"].value(
+        "file", "plugins/radiation/spectral_data/camera_spectral_library.xml");
+    context.loadXML(camera_spectral_file.c_str(), true);
     std::string camera_type =
         radiation_cfg["camera_spectral_data"]["camera_type"]
             .get<std::string>();
@@ -329,7 +352,7 @@ void init_spectral_data(Context &context,
     // Part 3: Leaf optics
     // Initialize leaf optics properties with fitted parameters
     LeafOpticsProperties leafopticsprops;
-    leafoptics.getPropertiesFromLibrary("cowpea", leafopticsprops);
+    leafoptics.getPropertiesFromLibrary("prospect", leafopticsprops);
     leafopticsprops.numberlayers = sampled_params["leafoptics"].value("number_layers", 1.5824);
     leafopticsprops.chlorophyllcontent = sampled_params["leafoptics"].value("chlorophyll_content", 37.4129);
     leafopticsprops.carotenoidcontent = sampled_params["leafoptics"].value("carotenoid_content", 12.2658);
@@ -340,8 +363,8 @@ void init_spectral_data(Context &context,
     leafopticsprops.protein = sampled_params["leafoptics"].value("protein", 0.0);
     leafopticsprops.carbonconstituents = sampled_params["leafoptics"].value("carbon_constituents", 0.0);
 
-    // Run cowpea model to generate leaf_reflectivity_cowpea and leaf_transmissivity_cowpea
-    leafoptics.run(leafopticsprops, "cowpea");
+    // Run cowpea model to generate leaf_reflectivity_prospect and leaf_transmissivity_prospect
+    leafoptics.run(leafopticsprops, "prospect");
 
     return;
 }
@@ -561,7 +584,7 @@ int main(int argc, char *argv[]) {
     if (args.params_file.size() > 0) {
         params_file = args.params_file;
     } else {
-        params_file = "../params.json";
+        params_file = "../dap_10_plot_2_12_0000_Method5_+Grounding.json";
     }
     std::cout << "Loading " << params_file << std::endl;
     json json_params = loadParametersFromJson(params_file);
@@ -702,8 +725,8 @@ int main(int argc, char *argv[]) {
             // Automatically calculate ground size
             float ground_x = ground_width_visible * 1.05; // 5 percent buffer
             float ground_y = ground_height_visible * 1.05; // 5 percent buffer
-            sampled_params["field"]["plot_shape"]["size_x"] = ground_width_visible;
-            sampled_params["field"]["plot_shape"]["size_y"] = ground_height_visible;
+            sampled_params["field"]["plot_shape"]["size_x"] = round_4digit(ground_width_visible);
+            sampled_params["field"]["plot_shape"]["size_y"] = round_4digit(ground_height_visible);
 #endif
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
@@ -752,8 +775,9 @@ int main(int argc, char *argv[]) {
                             .get<std::string>());
         // Make the ground plane single-sided (only visible from above)
         context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
-        // Make ground shiny?
-        context.setPrimitiveData(UUIDs_ground, "specular_exponent", 1.f);
+        // Set ground specular exponent from JSON
+        float ground_specular = sampled_params["field"]["plot_shape"].value("specular_exponent", 5.0f);
+        context.setPrimitiveData(UUIDs_ground, "specular_exponent", ground_specular);
 
         // Create multiple plots in a grid pattern
         std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
