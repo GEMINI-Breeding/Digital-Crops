@@ -394,6 +394,7 @@ struct CommandLineOptions {
     bool run_radiation = true;  // Run faster if running without radiation?
     bool vis = false; // Skip visualizer image by default
     bool calibrate_color = false; // Add color calibration panel and run auto-calibration
+    bool dry_run = false; // Load and validate JSON without running generation
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
@@ -428,6 +429,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.vis = true;
         } else if (arg == "--gui") {
             options.gui = true;
+        } else if (arg == "--dry-run") {
+            options.dry_run = true;
         } else if (arg == "--help") {
             // Print help message
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
@@ -441,6 +444,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --radiation true|false   Run radiation model (default: true)\n"
                       << "  --vis                    Save visualizer image (default: true)\n"
                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
+                      << "  --dry-run                Load and validate JSON without running generation\n"
                       << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
                       << "  -t, --tile FILE          Set tile file path\n"
                       << "  -o, --output DIR         Set output directory (default: from params.json)\n"
@@ -511,6 +515,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  run_radiation: " << (options.run_radiation ? "true" : "false") << std::endl;
         std::cout << "  vis: " << (options.vis ? "true" : "false") << std::endl;
         std::cout << "  calibrate_color: " << (options.calibrate_color ? "true" : "false") << std::endl;
+        std::cout << "  dry_run: " << (options.dry_run ? "true" : "false") << std::endl;
         std::cout << "  height: " << options.height << std::endl;
         std::cout << "  days: " << options.days << std::endl;
         std::cout << "  seed: " << options.seed << std::endl;
@@ -632,6 +637,129 @@ int main(int argc, char *argv[]) {
     original_params_file.close();
     std::cout << "Saved original parameters to: original_params.json"
               << std::endl;
+
+    // Dry-run mode: validate JSON structure and exit without running generation
+    if (args.dry_run) {
+        std::cout << "\n" << std::string(60, '=') << std::endl;
+        std::cout << "DRY-RUN MODE: Validating JSON structure..." << std::endl;
+        std::cout << std::string(60, '=') << std::endl;
+        
+        // Check required top-level keys
+        std::vector<std::string> required_keys = {
+            "seed", "field", "sun_position", "plantarchitecture",
+            "cameraproperties", "radiationmodel", "leafoptics"
+        };
+        
+        bool all_keys_present = true;
+        std::cout << "\nChecking required top-level keys:" << std::endl;
+        for (const auto& key : required_keys) {
+            bool present = json_params.contains(key);
+            std::cout << "  " << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
+            if (!present) all_keys_present = false;
+        }
+        
+        // Check field sub-keys
+        std::cout << "\nChecking field parameters:" << std::endl;
+        if (json_params.contains("field")) {
+            auto& field = json_params["field"];
+            std::vector<std::string> field_keys = {"plant_type", "plant_age", "plot_shape", "mode", "plants"};
+            for (const auto& key : field_keys) {
+                bool present = field.contains(key);
+                std::cout << "  field." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
+                if (!present) all_keys_present = false;
+            }
+            
+            // Check plot_shape sub-keys
+            if (field.contains("plot_shape")) {
+                auto& plot_shape = field["plot_shape"];
+                std::vector<std::string> plot_keys = {"plot_width", "plot_length", "plot_height"};
+                for (const auto& key : plot_keys) {
+                    bool present = plot_shape.contains(key);
+                    std::cout << "  field.plot_shape." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
+                }
+            }
+            
+            // Check plants array
+            if (field.contains("plants") && field["plants"].is_array()) {
+                int num_plants = field["plants"].size();
+                std::cout << "  field.plants: " << num_plants << " plant(s) defined" << std::endl;
+                
+                // Check first plant structure as sample
+                if (num_plants > 0) {
+                    auto& first_plant = field["plants"][0];
+                    std::vector<std::string> plant_keys = {"bed", "row", "x", "y"};
+                    std::cout << "  Sample plant[0] structure:" << std::endl;
+                    for (const auto& key : plant_keys) {
+                        bool present = first_plant.contains(key);
+                        std::cout << "    " << key << ": " << (present ? "✓" : "✗") << std::endl;
+                    }
+                }
+            }
+        }
+        
+        // Check sun_position
+        std::cout << "\nChecking sun_position parameters:" << std::endl;
+        if (json_params.contains("sun_position")) {
+            auto& sun = json_params["sun_position"];
+            std::vector<std::string> sun_keys = {"elevation_degrees", "azimuth_degrees"};
+            for (const auto& key : sun_keys) {
+                bool present = sun.contains(key);
+                std::cout << "  sun_position." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
+            }
+        }
+        
+        // Check cameraproperties
+        std::cout << "\nChecking cameraproperties:" << std::endl;
+        if (json_params.contains("cameraproperties")) {
+            auto& cam = json_params["cameraproperties"];
+            std::vector<std::string> cam_keys = {"camera_height", "HFOV", "camera_resolution_x", "camera_resolution_y"};
+            for (const auto& key : cam_keys) {
+                bool present = cam.contains(key);
+                std::cout << "  cameraproperties." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
+            }
+        }
+        
+        // Check leafoptics (PROSPECT model parameters)
+        std::cout << "\nChecking leafoptics (PROSPECT model):" << std::endl;
+        if (json_params.contains("leafoptics")) {
+            auto& leaf = json_params["leafoptics"];
+            std::vector<std::string> leaf_keys = {
+                "number_layers", "chlorophyll_content", "carotenoid_content",
+                "anthocyan_content", "brown_pigments", "water_mass", "dry_mass"
+            };
+            for (const auto& key : leaf_keys) {
+                bool present = leaf.contains(key);
+                std::cout << "  leafoptics." << key << ": " << (present ? "✓ present" : "⚠ missing (will use default)") << std::endl;
+            }
+        }
+        
+        // Check plantarchitecture
+        std::cout << "\nChecking plantarchitecture:" << std::endl;
+        if (json_params.contains("plantarchitecture")) {
+            auto& arch = json_params["plantarchitecture"];
+            if (arch.contains("phytomer_parameters")) {
+                std::cout << "  plantarchitecture.phytomer_parameters: ✓ present" << std::endl;
+                if (arch["phytomer_parameters"].contains("leaf_pitch")) {
+                    std::cout << "  plantarchitecture.phytomer_parameters.leaf_pitch: ✓ present" << std::endl;
+                }
+            }
+            if (arch.contains("flower_bud_break_probability")) {
+                std::cout << "  plantarchitecture.flower_bud_break_probability: ✓ present" << std::endl;
+            }
+        }
+        
+        // Summary
+        std::cout << "\n" << std::string(60, '=') << std::endl;
+        if (all_keys_present) {
+            std::cout << "✓ JSON validation PASSED - All required keys present" << std::endl;
+        } else {
+            std::cout << "✗ JSON validation FAILED - Some required keys are missing" << std::endl;
+        }
+        std::cout << std::string(60, '=') << std::endl;
+        std::cout << "\nDry-run complete. Exiting without running generation." << std::endl;
+        
+        return all_keys_present ? 0 : 1;
+    }
 
     // number of data samples
     const int num_iterations = args.num_iterations;
