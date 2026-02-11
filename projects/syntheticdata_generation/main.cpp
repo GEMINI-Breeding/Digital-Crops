@@ -30,7 +30,7 @@ bool g_debug_mode = false;
 
 // Camera setup structure to bundle related parameters
 struct CameraSetup {
-    CameraProperties cam_prop;
+    CameraProperties cam_prop; // See Helios/plugins/radiation/include/RadiationModel.h
     vec3 camera_position;
     vec3 camera_lookat;
     SphericalCoord sun_dir;
@@ -85,17 +85,50 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     setup.cam_prop.lens_diameter =
         cam_prop_json["lens_diameter"].get<float>(); 
 
-    setup.cam_prop.HFOV = cam_prop_json["HFOV"].get<float>();
+    float ground_x = sampled_params["field"]["size_x"];
+    float camera_height = cam_prop_json["camera_height"].get<float>();
+    setup.cam_prop.HFOV = calculateFOV(ground_x, camera_height);
+
     setup.cam_prop.camera_resolution = make_int2(
         cam_prop_json["camera_resolution_x"].get<int>(),
         cam_prop_json["camera_resolution_y"].get<int>());
+    
+    // Exposure mode: "auto" (automatic exposure), "ISOXXX" (ISO-based, e.g., "ISO100"), or "manual" (no automatic exposure scaling). ISO mode is calibrated to match auto-exposure at reference settings (ISO 100, 1/125s, f/2.8) for typical Helios
+    // scenes.
+#if 0
+    setup.cam_prop.exposure = "auto"; 
+#else
+    setup.cam_prop.exposure = "ISO12800"; 
+    setup.cam_prop.shutter_speed = 1.0 / 125.0f; 
+#endif
+    //setup.cam_prop.white_balance = "off";
+    //! Camera shutter speed in seconds (used for ISO-based exposure calculations). Example: 1/125 second = 0.008
 
+    // Deprecated - will be automatically updated
     // setup.cam_prop.FOV_aspect_ratio =
     //     float(setup.cam_prop.camera_resolution.x) /
     //     float(setup.cam_prop.camera_resolution.y);
+
     // Calculate plant canopy center based on plant base positions or default to origin
     vec3 canopy_center = make_vec3(0, 0, 0);
-    if (cam_prop_json["camera_positioning"]["center_plants"]) {
+    
+    // Check if center_plants key exists and is not null
+    bool center_plants = false;
+    try {
+        if (cam_prop_json.contains("camera_positioning") && 
+            cam_prop_json["camera_positioning"].contains("center_plants") &&
+            !cam_prop_json["camera_positioning"]["center_plants"].is_null()) {
+            center_plants = cam_prop_json["camera_positioning"]["center_plants"].get<bool>();
+            std::cout << "[DEBUG] center_plants = " << center_plants << std::endl;
+        } else {
+            std::cout << "[DEBUG] center_plants key not found or null, using default: false" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Failed to read camera_positioning.center_plants: " << e.what() << std::endl;
+        std::cerr << "[ERROR] Using default value: false" << std::endl;
+    }
+    
+    if (center_plants) {
         // Get bounding box from plant base positions for more accurate centering
         vec3 min_corner = make_vec3(std::numeric_limits<float>::max(), 
                                     std::numeric_limits<float>::max(), 
@@ -672,7 +705,7 @@ int main(int argc, char *argv[]) {
             // Check plot_shape sub-keys
             if (field.contains("plot_shape")) {
                 auto& plot_shape = field["plot_shape"];
-                std::vector<std::string> plot_keys = {"plot_width", "plot_length", "plot_height"};
+                std::vector<std::string> plot_keys = {"size_x", "size_y", "size_z"};
                 for (const auto& key : plot_keys) {
                     bool present = plot_shape.contains(key);
                     std::cout << "  field.plot_shape." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
@@ -827,42 +860,58 @@ int main(int argc, char *argv[]) {
 
         // create ground - either OBJ-based or tile-based
         std::vector<uint> UUIDs_ground;
-        if (sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>()) {
+        
+        // Check if use_obj_ground key exists and is not null
+        bool use_obj_ground = false;
+        try {
+            if (sampled_params.contains("field") &&
+                sampled_params["field"].contains("plot_shape") &&
+                sampled_params["field"]["plot_shape"].contains("use_obj_ground") &&
+                !sampled_params["field"]["plot_shape"]["use_obj_ground"].is_null()) {
+                use_obj_ground = sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>();
+                std::cout << "[DEBUG] use_obj_ground = " << use_obj_ground << std::endl;
+            } else {
+                std::cout << "[DEBUG] field.plot_shape.use_obj_ground key not found or null, using default: false" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[ERROR] Failed to read field.plot_shape.use_obj_ground: " << e.what() << std::endl;
+            std::cerr << "[ERROR] Using default value: false" << std::endl;
+        }
+        
+        if (use_obj_ground) {
             UUIDs_ground = make_field(context, sampled_params);
         } else {
             // Calculate pixel size on ground based on camera FOV and resolution from params
             auto cam_prop = sampled_params["cameraproperties"];
             float camera_height = cam_prop["camera_height"].get<float>();
-            float HFOV = cam_prop["HFOV"].get<float>();
             int camera_res_x = cam_prop["camera_resolution_x"].get<int>();
             int camera_res_y = cam_prop["camera_resolution_y"].get<int>();
             
+#if 1
+            // load dirt texture with fixed size (original method)
+            float ground_x = sampled_params["field"]["size_x"].get<float>() * 1.05; // 5 percent buffer
+            float ground_y = sampled_params["field"]["size_y"].get<float>() * 1.05; // 5 percent buffer
+#else   
+            float HFOV = cam_prop["HFOV"].get<float>();
             float HFOV_rad = deg2rad(HFOV);
+            // Fix HFOV, and get the VFOV based on image ratio
             float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
             float VFOV_rad = deg2rad(VFOV);
             
             // Ground coverage in each dimension
             float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
             float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
-            
-#if 0
-            // load dirt texture with fixed size (original method)
-            float ground_x = sampled_params["field"]["plot_shape"]["size_x"];
-            float ground_y = sampled_params["field"]["plot_shape"]["size_y"];
-#else   
             // Automatically calculate ground size
             float ground_x = ground_width_visible * 1.05; // 5 percent buffer
             float ground_y = ground_height_visible * 1.05; // 5 percent buffer
-            sampled_params["field"]["plot_shape"]["size_x"] = round_4digit(ground_width_visible);
-            sampled_params["field"]["plot_shape"]["size_y"] = round_4digit(ground_height_visible);
 #endif
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
             helios::vec2 field_size = make_vec2(ground_x, ground_y);
 
             // Pixel size on ground
-            float pixel_size_x = ground_width_visible / camera_res_x;
-            float pixel_size_y = ground_height_visible / camera_res_y;
+            float pixel_size_x = ground_x / camera_res_x;
+            float pixel_size_y = ground_y / camera_res_y;
             float pixel_size = std::max(pixel_size_x, pixel_size_y);
             
             // Set patch size to be smaller than pixel size (half pixel for good sampling)
@@ -879,7 +928,7 @@ int main(int argc, char *argv[]) {
             if (g_debug_mode) {
                 std::cout << "[DEBUG] Ground tile subdivision calculation:" << std::endl;
                 std::cout << "  Camera height: " << camera_height << " m" << std::endl;
-                std::cout << "  Ground visible: " << ground_width_visible << " x " << ground_height_visible << " m" << std::endl;
+                std::cout << "  Ground size: " << ground_x << " x " << ground_y << " m" << std::endl;
                 std::cout << "  Pixel size on ground: " << pixel_size << " m" << std::endl;
                 std::cout << "  Desired patch size: " << desired_patch_size << " m" << std::endl;
                 std::cout << "  Subdivision (raw): " << subdiv_x << " x " << subdiv_y << std::endl;
@@ -912,121 +961,165 @@ int main(int argc, char *argv[]) {
         if (mode == GenerationMode::AUTO) {
             // Auto plot generation - Earl
             init_plant_architecture(plantarchitecture, sampled_params);
-            auto auto_cfg = sampled_params["field"]["auto_config"];
+            auto auto_planting_cfg = sampled_params["field"]["auto_config"];
             // Calculate grid positioning to center all plots
-            int num_beds = auto_cfg["num_beds"].get<int>();
-            int num_rows = auto_cfg["num_rows"].get<int>();
+            int num_beds = auto_planting_cfg["num_beds"].get<int>();
+            int num_rows = auto_planting_cfg["num_rows"].get<int>();
             float plot_spacing_x =
-                auto_cfg["plot_spacing_x"].get<float>();
+                auto_planting_cfg["plot_spacing_x"].get<float>();
             float plot_spacing_y =
-                auto_cfg["plot_spacing_y"].get<float>();
-            float total_plot_width = (num_beds - 1) * plot_spacing_x;
-            float total_plot_height = (num_rows - 1) * plot_spacing_y;
-            float start_x = -total_plot_width / 2.0f;
-            float start_y = -total_plot_height / 2.0f;
-
+                auto_planting_cfg["plot_spacing_y"].get<float>();
+            float total_size_x = num_beds * plot_spacing_x;
+            float total_size_y = num_rows * plot_spacing_y;
             std::cout << "Creating " << num_beds << "x"
                       << num_rows << " plot grid..." << std::endl;
 
+            float start_x = -total_size_x / 2.0f;
+            float start_y = -total_size_y / 2.0f;
+
             // Create plants for this plot
-            for (int row = 0; row < num_rows; ++row) {
-                for (int bed = 0; bed < num_beds; ++bed) {
-                    // Calculate position for this plot
+            json plots_array = json::array();
+            for (int row = 0; row < num_rows; row++) {
+                for (int bed = 0; bed < num_beds; bed++) {
+                    // Calculate center position for this plot
                     float plot_x = start_x + bed * plot_spacing_x;
                     float plot_y = start_y + row * plot_spacing_y;
 
                     std::vector<uint> plot_plant_IDs =
                         plantarchitecture.buildPlantCanopyFromLibrary(
                             make_vec3(plot_x, plot_y, 0),
-                            make_vec2(auto_cfg["plant_spacing_x"],
-                                      auto_cfg["plant_spacing_y"]),
-                            make_int2(auto_cfg["planting_rows"],
-                                      auto_cfg["plant_count"]),
+                            make_vec2(auto_planting_cfg["plant_spacing_x"],
+                                      auto_planting_cfg["plant_spacing_y"]),
+                            make_int2(auto_planting_cfg["planting_rows"],
+                                      auto_planting_cfg["plant_count"]),
                             0);
 
                     // Add to the aging collection
                     plant_IDs_aging.insert(plant_IDs_aging.end(),
                                          plot_plant_IDs.begin(),
                                          plot_plant_IDs.end());
-                }
-            }
-            // Add num_beds and num_rows to sampled_params["field"]
-            sampled_params["field"]["num_beds"] = sampled_params["field"]["auto_config"]["num_beds"];
-            sampled_params["field"]["num_rows"] = sampled_params["field"]["auto_config"]["num_rows"];
-        } else if (mode == GenerationMode::MANUAL) {
-            // Manual plot generation - Heesup
-            float plot_width = sampled_params["field"]["plot_shape"]["plot_width"];
-            float plot_length = sampled_params["field"]["plot_shape"]["plot_length"];
-            // NEED TO UPDATE HEARE - There is no more PLOT, plants only exist
-            int num_beds = 0;
-            int num_rows = 0;
-            int num_plants = 0;
-            auto plants = sampled_params["field"]["plants"];
-            if (sampled_params["field"].contains("plants") 
-                && sampled_params["field"]["plants"].is_array()) {
-                num_plants = sampled_params["field"]["plants"].size();
-            }
 
-             // params.json only have single plant type within plot for now
-            init_plant_architecture(plantarchitecture, sampled_params);
-            
-            // Get crop type and convert to lowercase for plant library
-            for (int j = 0; j < num_plants; j++) {
-                int bed = plants[j]["bed"];
-                int row = plants[j]["row"];
+                    // Add to json
+                    json plot_info;
+                    plot_info["bed"] = bed;
+                    plot_info["row"] = row;
 
-                num_beds = std::max(bed, num_beds);
-                num_rows = std::max(row, num_rows);
-
-                // Select the specific crop
-                json selected_crop = plants[j];
-                
-                // plant count and age can be changed here
-                vec3 origin(0, 0, 0);
-
-                float X = selected_crop["x"];
-                float Y = selected_crop["y"];
-                origin.x = (bed-1) * plot_width;
-                origin.y = (row-1) * plot_length;
-                // float Z = config["crops"][i]["Z"].as<float>();
-                vec3 plant_origin = origin + make_vec3(X, Y, 0);
-                
-                // Check if xml path is provided and valid
-                if (selected_crop.contains("xml") && 
-                    selected_crop["xml"].is_string() && 
-                    !selected_crop["xml"].get<std::string>().empty()) {
-                    // Build plant from XML file (already aged)
-                    // It will not use plant origin. It will use base position from the XML
-                    std::string xml_path = selected_crop["xml"].get<std::string>();
-                    std::vector<uint> plot_plant_IDs;
-                    plot_plant_IDs = plantarchitecture.readPlantStructureXML(xml_path, 0);
-                    for(int i=0;i < plot_plant_IDs.size();i++) {
-                        std::cout << "Loaded plant from XML (ID:" << plot_plant_IDs[i] << "): " << xml_path << std::endl;
+                    json plants_array = json::array();
+                    for (size_t plant_i = 0; plant_i < plant_i < plot_plant_IDs.size(); plant_i++) {
+                        json plant_info;
+                        uint plantID = plot_plant_IDs[plant_i];
+                        vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
+                        // Just write absolute position
+                        plant_info["x"] = plant_position.x;
+                        plant_info["y"] = plant_position.y;
+                        plants_array.push_back(plot_info);
                     }
-                } else {
-                    // Build plant from library (needs aging)
-                    uint plantID;
-                    plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, true);
-                    plant_IDs_aging.push_back(plantID);
-                    std::cout << "Generated plant from library (ID:" << plantID << ")" << std::endl;
+                    // Update plants
+                    plot_info["plants"] = plants_array;
+                    plots_array.push_back(plot_info);
+                    
                 }
             }
-            
+            sampled_params["field"]["plots"] = plots_array;
+
             // Add num_beds and num_rows to sampled_params["field"]
             sampled_params["field"]["num_beds"] = num_beds;
             sampled_params["field"]["num_rows"] = num_rows;
+
+        } else if (mode == GenerationMode::MANUAL) {
+            // Manual plot generation - Heesup
+            // Support both "size_x"/"width" and "size_y"/"length" field names
+            float size_x = 3.0f;  // default
+            float size_y = 6.0f; // default
+
+            // Remove auto_config key in manual mode before saving
+            if (mode == GenerationMode::MANUAL && sampled_params.contains("field") && 
+                sampled_params["field"].contains("auto_config")) {
+                sampled_params["field"].erase("auto_config");
+            }
+            
+            try {
+                auto& plot_shape = sampled_params["field"]["plot_shape"];
+                
+                // Try size_x first, then width, else use default
+                if (plot_shape.contains("size_x") && !plot_shape["size_x"].is_null()) {
+                    size_x = plot_shape["size_x"].get<float>();
+                    std::cout << "[DEBUG] Using size_x = " << size_x << std::endl;
+                } else if (plot_shape.contains("width") && !plot_shape["width"].is_null()) {
+                    size_x = plot_shape["width"].get<float>();
+                    std::cout << "[DEBUG] Using width = " << size_x << std::endl;
+                } else {
+                    std::cout << "[DEBUG] size_x/width not found, using default: " << size_x << std::endl;
+                }
+                
+                // Try size_y first, then length, else use default
+                if (plot_shape.contains("size_y") && !plot_shape["size_y"].is_null()) {
+                    size_y = plot_shape["size_y"].get<float>();
+                    std::cout << "[DEBUG] Using size_y = " << size_y << std::endl;
+                } else if (plot_shape.contains("length") && !plot_shape["length"].is_null()) {
+                    size_y = plot_shape["length"].get<float>();
+                    std::cout << "[DEBUG] Using length = " << size_y << std::endl;
+                } else {
+                    std::cout << "[DEBUG] size_y/length not found, using default: " << size_y << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Failed to read size_x/size_y: " << e.what() << std::endl;
+                std::cerr << "[ERROR] Using default values: width=" << size_x << ", length=" << size_y << std::endl;
+            }
+            
+            int num_beds = sampled_params["field"]["num_beds"];
+            int num_rows = sampled_params["field"]["num_rows"];
+
+            // params.json only have single plant type within plot for now
+            // Get crop type and convert to lowercase for plant library
+            init_plant_architecture(plantarchitecture, sampled_params);
+            auto plots = sampled_params["field"]["plots"];
+            int num_plots = plots.size();
+            for (int plot_i=0; plot_i < num_plots; plot_i++) {
+                int bed = plots[plot_i]["bed"];
+                int row = plots[plot_i]["row"];
+                auto plants = plots[plot_i]["plants"];
+                int num_plants = plants.size();
+                for (int plant_j = 0; plant_j < num_plants; plant_j++) {
+                    // Select the specific crop
+                    json selected_crop = plants[plant_j];
+                    
+                    // plant count and age can be changed here
+                    vec3 origin(0, 0, 0);
+
+                    float X = selected_crop["x"];
+                    float Y = selected_crop["y"];
+                    origin.x = (bed-1) * size_x;
+                    origin.y = (row-1) * size_y;
+                    // float Z = config["crops"][i]["Z"].as<float>();
+                    vec3 plant_origin = origin + make_vec3(X, Y, 0);
+                    
+                    // Check if xml path is provided and valid
+                    if (selected_crop.contains("xml") && 
+                        selected_crop["xml"].is_string() && 
+                        !selected_crop["xml"].get<std::string>().empty()) {
+                        // Build plant from XML file (already aged)
+                        // It will not use plant origin. It will use base position from the XML
+                        std::string xml_path = selected_crop["xml"].get<std::string>();
+                        std::vector<uint> plot_plant_IDs;
+                        plot_plant_IDs = plantarchitecture.readPlantStructureXML(xml_path, 0);
+                        for(int i=0;i < plot_plant_IDs.size();i++) {
+                            std::cout << "Loaded plant from XML (ID:" << plot_plant_IDs[i] << "): " << xml_path << std::endl;
+                        }
+                    } else {
+                        // Build plant from library (needs aging)
+                        uint plantID;
+                        plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, true);
+                        plant_IDs_aging.push_back(plantID);
+                        std::cout << "Generated plant from library (ID:" << plantID << ")" << std::endl;
+                    }
+                }
+            }
         } else {
             std::cout << "[WARN] plots mode is not defined or invalid!"
                       << std::endl;
             return 0;
         }
-
-        // Remove auto_config key in manual mode before saving
-        if (mode == GenerationMode::MANUAL && sampled_params.contains("field") && 
-            sampled_params["field"].contains("auto_config")) {
-            sampled_params["field"].erase("auto_config");
-        }
-
 
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
@@ -1047,12 +1140,13 @@ int main(int argc, char *argv[]) {
                           << " days" << std::endl;
             }
         }
+        update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
 
         // Write the plant structure to an XML file
         if (args.save_xml) {
             // Track XML file paths to add to params
             std::vector<std::string> xml_file_paths;
-            
+
             for (int i = 0; i < UUIDs_plants.size(); i++) {
                 uint plantID = UUIDs_plants[i];
                 // filename with zero-padded plant number
@@ -1063,62 +1157,20 @@ int main(int argc, char *argv[]) {
                 plantarchitecture.writePlantStructureXML(plantID, xml_file_name);
                 xml_file_paths.push_back(xml_file_name);  // Store relative path
             }
-            
+
             // Add XML file paths and plant locations to sampled_params and re-save
             if (!xml_file_paths.empty()) {
-                if (mode == GenerationMode::MANUAL && sampled_params["field"].contains("plants") 
-                    && sampled_params["field"]["plants"].is_array()) {
-                    // For manual mode, add xml path to each crop
-                    int num_plants = sampled_params["field"]["plants"].size();
-                    for (size_t j = 0; j < xml_file_paths.size() && j < num_plants; j++) {
-                        sampled_params["field"]["plants"][j]["xml"] = xml_file_paths[j];
+                int global_plant_i = 0;
+                // Assume the plantID will start from plot[0]plant[0]
+                auto plots = sampled_params["field"]["plots"];
+                int num_plots = plots.size();
+                for (int plot_i=0;plot_i < num_plots;plot_i++) {
+                    auto plants = plots[plot_i]["plants"];
+                    int num_plants = plants.size();
+                    std::cout << "num_plants: " << num_plants << std::endl;
+                    for (int plant_i = 0; plant_i < num_plants; plant_i++) {
+                        sampled_params["field"]["plots"][plot_i]["plants"][plant_i]["xml"] = xml_file_paths[global_plant_i++];
                     }
-                } else if (mode == GenerationMode::AUTO) {
-                    // For auto mode, create crops array with position and XML data
-                    json crops_array = json::array();
-                    auto auto_config = sampled_params["field"]["auto_config"];
-                    // Get grid parameters used during generation
-                    int num_beds = auto_config["num_beds"].get<int>();
-                    int num_rows = auto_config["num_rows"].get<int>();
-                    float plot_spacing_x = auto_config["plot_spacing_x"].get<float>();
-                    float plot_spacing_y = auto_config["plot_spacing_y"].get<float>();
-                    float total_plot_width = (num_beds - 1) * plot_spacing_x;
-                    float total_plot_height = (num_rows - 1) * plot_spacing_y;
-                    float start_x = -total_plot_width / 2.0f;
-                    float start_y = -total_plot_height / 2.0f;
-                    
-                    for (size_t j = 0; j < xml_file_paths.size() && j < UUIDs_plants.size(); j++) {
-                        uint plantID = UUIDs_plants[j];
-                        vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
-                        
-                        // Calculate which bed and row this plant belongs to based on its position
-                        // The plot center positions were: plot_x = start_x + bed * plot_spacing_x
-                        //                                plot_y = start_y + row * plot_spacing_y
-                        int bed = static_cast<int>(std::round((plant_position.x - start_x) / plot_spacing_x));
-                        int row = static_cast<int>(std::round((plant_position.y - start_y) / plot_spacing_y));
-                        
-                        // Calculate the plot center for this bed/row
-                        float plot_center_x = start_x + bed * plot_spacing_x;
-                        float plot_center_y = start_y + row * plot_spacing_y;
-                        
-                        // Calculate position relative to plot center
-                        float x_relative = plant_position.x - plot_center_x;
-                        float y_relative = plant_position.y - plot_center_y;
-                        
-                        json crop_info;
-                        crop_info["bed"] = bed;
-                        crop_info["row"] = row;
-                        crop_info["x"] = x_relative;
-                        crop_info["y"] = y_relative;
-                        crop_info["xml"] = xml_file_paths[j];
-                        
-                        crops_array.push_back(crop_info);
-                    }
-                    
-                    sampled_params["field"]["plants"] = crops_array;
-                } else {
-                    // Fallback: add as a top-level array
-                    sampled_params["xml_files"] = xml_file_paths;
                 }
             }
         }
@@ -1138,7 +1190,6 @@ int main(int argc, char *argv[]) {
         params_file << std::setw(4) << sampled_params << std::endl;
         params_file.close();
         
-
         // Add debug patch
         if (args.debug) {
             // Add a reference object
@@ -1167,51 +1218,12 @@ int main(int argc, char *argv[]) {
             float FOV_aspect_ratio = cam_prop.camera_resolution.x / float(cam_prop.camera_resolution.y);
             vis.setCameraFieldOfView(
                 HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
+
             //vis.plotUpdate(true);
             vis.buildContextGeometry(&context);
 
             std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
             vis.printWindow(save_path.c_str());
-
-            // // Generate annotations
-            // // Declare the Synthetic Annotation class.
-            // SyntheticAnnotation annotation(&context);
-            // annotation.setCameraPosition(camera_position, camera_lookat);
-            // annotation.disableInstanceSegmentation();
-            // annotation.enableObjectDetection();
-            // // annotation.setWindowSize(800, 800);
-
-            // annotation.labelPrimitives("plants");
-            // // // Add labels according to whatever scheme we want.
-            // for (int i = 0; i < UUIDs_plants.size(); i++) {
-            //     uint plantID = UUIDs_plants[i];
-            //     {
-            //     // loop over plants
-            //     std::vector<uint> IDs_plant = plantarchitecture.getAllPlantUUIDs(plantID);
-                
-            //     // annotation.labelPrimitives(plantarchitecture.getBranchUUIDs(plantID),
-            //     //                            "branches");
-            //     // annotation.labelPrimitives(plantarchitecture.getLeafUUIDs(plantID),
-            //     //                            "leaves");
-            //     // std::vector<std::vector<std::vector<uint>>> fruitUUIDs =
-            //     //     canopygenerator.getFruitUUIDs(p);
-            //     // if (fruitUUIDs.size() == 1) { // no clusters, only
-            //     //     individual fruit for (auto &fruit :
-            //     //     fruitUUIDs.front())
-            //     //         annotation.labelPrimitives(fruit, "clusters");
-            //     // } else if (fruitUUIDs.size() >
-            //     //            1) { // fruit contained within cluster - label
-            //     //            by
-            //     //     cluster for (auto &cluster : fruitUUIDs)
-            //     //         annotation.labelPrimitives(flatten(cluster),
-            //     //                                    "clusters");
-            //     // }
-            //     }
-            // }
-            // // Render the annotations.
-            // save_path = output_dir + "/" + filename + "/";
-            // std::cout << save_path;
-            // annotation.render(save_path.c_str());
 
             if (args.gui) {
                 // plotInteractive for GUI mode
@@ -1240,12 +1252,13 @@ int main(int argc, char *argv[]) {
 
             if (g_debug_mode) std::cout << "[DEBUG] Running radiation bands..." << std::endl;
             radiation.runBand(bandlabels);
-            printGPUMemoryUsage("After runBand");
-
+            
+            
             // process image using standard pipeline
-            radiation.applyCameraImageCorrections(cameralabel, "red", "green",
-                                                   "blue");
-
+            // radiation.applyCameraImageCorrections(cameralabel, "red", "green",
+            //     "blue", 1.0, 0.5, 1.0);
+            printGPUMemoryUsage("After runBand");
+            
             // save rendered RGB image with custom filename
             std::string image_file = radiation.writeCameraImage(
                 cameralabel, bandlabels, "RGB", output_dir, 0);

@@ -233,4 +233,7 @@ float HFOVtoDFOV(float HFOV_deg, float aspect_ratio) {
     return rad2deg(df_rad);
 }
 
-
+float calculateFOV(float visible_length, float camera_height) {
+    float FOV_rad = 2.0 * atan(visible_length / camera_height / 2.0f);
+    return rad2deg(FOV_rad);
+}

@@ -137,26 +137,24 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
     }
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), \
-                    plot_shape["plot_height"], nullrotation, RGB::white);
+                    plot_shape["size_z"], nullrotation, RGB::white);
 
     // Rescale only X and Y to match bed dimensions, preserve Z from DEM
     // The OBJ file already has correct Z values (elevations) normalized to plant locations
-    vec3 plot_extent = make_vec3(plot_shape["plot_width"].get<float>(), \
-                    plot_shape["plot_length"].get<float>(), plot_shape["plot_height"].get<float>());
+    vec3 plot_extent = make_vec3(plot_shape["size_x"].get<float>(), \
+                    plot_shape["size_y"].get<float>(), plot_shape["size_z"].get<float>());
     rescaleUUIDsToSize(context, UUIDs, plot_extent);
 
-#if 1
     // Apply plot heading rotation if specified
-    if (plot_shape.contains("plot_heading")) {
-        float plot_heading_deg = plot_shape["plot_heading"].get<float>();
-        if (plot_heading_deg != 0.0f) {
+    if (plot_shape.contains("rotate_obj")) {
+        float rotate_obj = plot_shape["rotate_obj"].get<float>();
+        if (rotate_obj != 0.0f) {
             // Convert degrees to radians and rotate around Z-axis
-            float plot_heading_rad = plot_heading_deg * M_PI / 180.0f;
-            context.rotatePrimitive(UUIDs, plot_heading_rad, "z");
-            std::cout << "Rotated ground mesh by " << plot_heading_deg << " degrees" << std::endl;
+            float rotate_obj_rad = rotate_obj * M_PI / 180.0f;
+            context.rotatePrimitive(UUIDs, rotate_obj_rad, "z");
+            std::cout << "Rotated ground mesh by " << rotate_obj << " degrees" << std::endl;
         }
     }
-#endif
 
     // Compute bounding box for the original OBJ once, since it's the same for all copies
     helios::vec3 min_corner, max_corner, extent;

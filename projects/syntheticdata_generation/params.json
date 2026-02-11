@@ -7,16 +7,18 @@
     "plant_age": { 
         "distribution": {
           "type": "uniform", 
-          "params": {"min": 10, "max": 30 }
+          "params": {"min": 90, "max": 90 }
         }
     },
+    "size_x": 3.0,
+    "size_y": 6.0,
     "plot_shape": {
-      "plot_height": 0.2,
-      "plot_width": 3.0,
-      "plot_length": 6.0,
-      "plot_heading": 90.0,
+      "size_x": 3.0,
+      "size_y": 6.0,
+      "size_z": 0.2,
       "soil_color": [0.61, 0.58, 0.55],
       "use_obj_ground": false,
+      "rotate_obj": 90.0,
       "obj_file_path": "../../../obj/dirt_rocks.obj",
       "specular_exponent": {
         "distribution": {
@@ -76,23 +78,31 @@
         }
       }
     },
-    "plants":[
+    "plots":[
       {
-        "bed": 1,"row": 1, "x": 0, "y": 0, "xml": ""
-      },
-      {
-        "bed": 1,"row": 1, "x": 0, "y": 0.75, "xml": ""
-      },
-      {
-        "bed": 1,"row": 1, "x": 0, "y": 1.5, "xml": ""
-      },
-      {
-        "bed": 1,"row": 1, "x": 0, "y": -0.75, "xml": ""
-      },
-      {
-        "bed": 1,"row": 1, "x": 0, "y": -1.5, "xml": ""
+        "bed": 1,
+        "row": 1,
+        "plants":[
+          {
+            "x": -0.5, "y": 0, "xml": ""
+          },
+          {
+            "x": -0.5, "y": 0.75, "xml": ""
+          },
+          {
+            "x": -0.5, "y": 1.5, "xml": ""
+          },
+          {
+            "x": -0.5, "y": -0.75, "xml": ""
+          },
+          {
+            "x": -0.5, "y": -1.5, "xml": ""
+          }
+        ]
       }
-    ]
+    ],
+    "num_beds": 1,
+    "num_rows": 1
   },
   "sun_position": {
     "elevation_degrees": {
@@ -125,7 +135,6 @@
         }
       } 
   },
-
   "cameraproperties": {
     "camera_height": {
         "distribution": {
@@ -145,22 +154,16 @@
           "params": { "min": 0.0028, "max": 0.0028 }
         }
       }, 
-    "HFOV": {
-        "distribution": {
-          "type": "constant",
-          "params": { "value": 120.0 }
-        }
-      }, 
     "camera_resolution_x": {
         "distribution": {
           "type": "constant",
-          "params": { "value": 1920 }
+          "params": { "value": 360 }
         }
       },
     "camera_resolution_y": {
         "distribution": {
           "type": "constant",
-          "params": { "value": 1080 }
+          "params": { "value": 720 }
         }
       },
     "camera_positioning": {
