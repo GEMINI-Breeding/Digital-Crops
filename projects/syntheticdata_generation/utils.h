@@ -29,7 +29,7 @@ json sampleParams(json &j_input, std::mt19937 &rng);
 // aspect_ratio: width / height
 float HFOVtoVFOV(float HFOV_deg, float aspect_ratio);
 float HFOVtoDFOV(float HFOV_deg, float aspect_ratio);
-
+float calculateFOV(float visible_length, float camera_height);
 
 // Function to compute bounding box and extent for a vector of UUIDs
 void getBoundingBoxAndExtent(helios::Context& context, const std::vector<unsigned int>& UUIDs, 

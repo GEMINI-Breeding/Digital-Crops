@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -24,6 +25,12 @@
 
 using namespace helios;
 namespace fs = std::filesystem;
+
+// Helper function to round a float to a specific number of decimal places
+inline double roundToPrecision(double value, int precision) {
+    double multiplier = std::pow(10.0, precision);
+    return std::round(value * multiplier) / multiplier;
+}
 
 // Global debug flag definition
 bool g_debug_mode = false;
@@ -1001,23 +1008,25 @@ int main(int argc, char *argv[]) {
 
                     // Add to json
                     json plot_info;
-                    plot_info["bed"] = bed;
-                    plot_info["row"] = row;
-
+                    plot_info["bed"] = (bed+1);
+                    plot_info["row"] = (row+1);
+                    
                     json plants_array = json::array();
-                    for (size_t plant_i = 0; plant_i < plant_i < plot_plant_IDs.size(); plant_i++) {
+                    //std::cout << "Num plants in bed " << bed << " row " << row << " => " << plot_plant_IDs.size() << std::endl;
+                    //std::cout << "plot_plant_IDs: " << plot_plant_IDs.front() << ".." <<  plot_plant_IDs.back() << std::endl;
+
+                    for (size_t plant_i = 0; plant_i < plot_plant_IDs.size(); plant_i++) {
                         json plant_info;
                         uint plantID = plot_plant_IDs[plant_i];
                         vec3 plant_position = plantarchitecture.getPlantBasePosition(plantID);
                         // Just write absolute position
-                        plant_info["x"] = plant_position.x;
-                        plant_info["y"] = plant_position.y;
-                        plants_array.push_back(plot_info);
+                        plant_info["x"] = roundToPrecision(plant_position.x, 4);
+                        plant_info["y"] = roundToPrecision(plant_position.y, 4);
+                        plants_array.push_back(plant_info);
                     }
                     // Update plants
                     plot_info["plants"] = plants_array;
                     plots_array.push_back(plot_info);
-                    
                 }
             }
             sampled_params["field"]["plots"] = plots_array;
@@ -1025,6 +1034,13 @@ int main(int argc, char *argv[]) {
             // Add num_beds and num_rows to sampled_params["field"]
             sampled_params["field"]["num_beds"] = num_beds;
             sampled_params["field"]["num_rows"] = num_rows;
+            
+            // Update field size and plot size
+            sampled_params["field"]["size_x"] = plot_spacing_x * num_beds;
+            sampled_params["field"]["size_y"] = plot_spacing_y * num_rows;
+            sampled_params["field"]["plot_shape"]["size_x"] = plot_spacing_x;
+            sampled_params["field"]["plot_shape"]["size_y"] = plot_spacing_y;
+
 
         } else if (mode == GenerationMode::MANUAL) {
             // Manual plot generation - Heesup
@@ -1089,10 +1105,11 @@ int main(int argc, char *argv[]) {
 
                     float X = selected_crop["x"];
                     float Y = selected_crop["y"];
-                    origin.x = (bed-1) * size_x;
-                    origin.y = (row-1) * size_y;
+                    origin.x = (bed-1) * size_x;    // plant locations are now absolte, need to be removed?
+                    origin.y = (row-1) * size_y; 
                     // float Z = config["crops"][i]["Z"].as<float>();
-                    vec3 plant_origin = origin + make_vec3(X, Y, 0);
+                    //vec3 plant_origin = origin + make_vec3(X, Y, 0);
+                    vec3 plant_origin = make_vec3(X, Y, 0); // Use absolute XY
                     
                     // Check if xml path is provided and valid
                     if (selected_crop.contains("xml") && 
