@@ -137,12 +137,12 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
     }
 
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), \
-                    plot_shape["size_z"], nullrotation, RGB::white);
+                    plot_shape["plot_size_z"], nullrotation, RGB::white);
 
     // Rescale only X and Y to match bed dimensions, preserve Z from DEM
     // The OBJ file already has correct Z values (elevations) normalized to plant locations
-    vec3 plot_extent = make_vec3(plot_shape["size_x"].get<float>(), \
-                    plot_shape["size_y"].get<float>(), plot_shape["size_z"].get<float>());
+    vec3 plot_extent = make_vec3(plot_shape["plot_size_x"].get<float>(), \
+                    plot_shape["plot_size_y"].get<float>(), plot_shape["plot_size_z"].get<float>());
     rescaleUUIDsToSize(context, UUIDs, plot_extent);
 
     // Apply plot heading rotation if specified

@@ -47,7 +47,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
                              json sampled_params) {
 
     // Load plant from Helios Library
-    plantarchitecture.loadPlantModelFromLibrary(sampled_params["field"]["plant_type"]);
+    plantarchitecture.loadPlantModelFromLibrary(sampled_params["metadata"]["plant_type"]);
     plantarchitecture.disableMessages();
     // Get the shoot parameters
     std::map<std::string, ShootParameters> shoot_params =
@@ -55,9 +55,9 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
     // update leaf pitch and peduncle length
     shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch    \
-     = sampled_params["plantarchitecture"]["phytomer_parameters"]["leaf_pitch"];
+     = sampled_params["plant_properties"]["architecture"]["phytomer_parameters"]["leaf_pitch"];
     shoot_params.at("trifoliate").flower_bud_break_probability      \
-     = sampled_params["plantarchitecture"]["flower_bud_break_probability"];
+     = sampled_params["plant_properties"]["architecture"]["flower_bud_break_probability"];
 
 
     // update leaf (comment out  below to render faster)
@@ -81,61 +81,70 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     CameraSetup setup;
     
     // camera params
-    json cam_prop_json = sampled_params["cameraproperties"];
+    json cam_prop_json = sampled_params["camera"];
     
     // focus on center of scene
     setup.cam_prop.focal_plane_distance =
-        cam_prop_json["camera_height"].get<float>() -
-        cam_prop_json["focal_plane_distance_difference"].get<float>(); 
+        cam_prop_json["positioning"]["camera_height"].get<float>() -
+        cam_prop_json["sensor"]["focal_plane_distance_difference"].get<float>(); 
 
     // make it small so it will be in focus
     setup.cam_prop.lens_diameter =
-        cam_prop_json["lens_diameter"].get<float>(); 
+        cam_prop_json["sensor"]["lens_diameter"].get<float>(); 
 
-    float ground_x = sampled_params["field"]["size_x"];
-    float camera_height = cam_prop_json["camera_height"].get<float>();
+    float ground_x = sampled_params["field"]["layout"]["plot_size_x"];
+    float camera_height = cam_prop_json["positioning"]["camera_height"].get<float>();
+    // Changes FOV to cover entire field
     setup.cam_prop.HFOV = calculateFOV(ground_x, camera_height);
-
     setup.cam_prop.camera_resolution = make_int2(
-        cam_prop_json["camera_resolution_x"].get<int>(),
-        cam_prop_json["camera_resolution_y"].get<int>());
+        cam_prop_json["sensor"]["resolution_x"].get<int>(),
+        cam_prop_json["sensor"]["resolution_y"].get<int>());
     
-    // Exposure mode: "auto" (automatic exposure), "ISOXXX" (ISO-based, e.g., "ISO100"), or "manual" (no automatic exposure scaling). ISO mode is calibrated to match auto-exposure at reference settings (ISO 100, 1/125s, f/2.8) for typical Helios
-    // scenes.
-#if 0
-    setup.cam_prop.exposure = "auto"; 
-#else
-    setup.cam_prop.exposure = "ISO12800"; 
-    setup.cam_prop.shutter_speed = 1.0 / 125.0f; 
-#endif
-    //setup.cam_prop.white_balance = "off";
-    //! Camera shutter speed in seconds (used for ISO-based exposure calculations). Example: 1/125 second = 0.008
-
-    // Deprecated - will be automatically updated
-    // setup.cam_prop.FOV_aspect_ratio =
-    //     float(setup.cam_prop.camera_resolution.x) /
-    //     float(setup.cam_prop.camera_resolution.y);
+    // Read exposure settings from JSON
+    // Exposure mode: "auto" (automatic exposure), "ISO" (ISO-based), or "manual" (no automatic exposure scaling)
+    std::string exposure_mode = cam_prop_json["sensor"].value("exposure_mode", "auto");
+    int iso_value = cam_prop_json["sensor"].value("ISO", 100);
+    std::string shutter_speed_str = cam_prop_json["sensor"].value("shutter_speed", "1/125");
+    
+    if (exposure_mode == "auto") {
+        setup.cam_prop.exposure = "auto";
+    } else if (exposure_mode == "ISO" || iso_value > 0) {
+        // Set ISO-based exposure (e.g., "ISO100", "ISO12800")
+        setup.cam_prop.exposure = "ISO" + std::to_string(iso_value);
+        
+        // Parse shutter speed from "1/125" format or decimal
+        if (shutter_speed_str.find('/') != std::string::npos) {
+            size_t slash_pos = shutter_speed_str.find('/');
+            float numerator = std::stof(shutter_speed_str.substr(0, slash_pos));
+            float denominator = std::stof(shutter_speed_str.substr(slash_pos + 1));
+            setup.cam_prop.shutter_speed = numerator / denominator;
+        } else {
+            setup.cam_prop.shutter_speed = std::stof(shutter_speed_str);
+        }
+    } else {
+        setup.cam_prop.exposure = "manual";
+    }
 
     // Calculate plant canopy center based on plant base positions or default to origin
     vec3 canopy_center = make_vec3(0, 0, 0);
     
-    // Check if center_plants key exists and is not null
-    bool center_plants = false;
+    // Check if focusing_plants key exists and is not null
+    bool focusing_plants = false;
     try {
-        if (cam_prop_json.contains("camera_positioning") && 
-            cam_prop_json["camera_positioning"].contains("center_plants") &&
-            !cam_prop_json["camera_positioning"]["center_plants"].is_null()) {
-            center_plants = cam_prop_json["camera_positioning"]["center_plants"].get<bool>();
-            std::cout << "[DEBUG] center_plants = " << center_plants << std::endl;
+        if (cam_prop_json.contains("positioning") && 
+            cam_prop_json["positioning"].contains("focusing_plants") &&
+            !cam_prop_json["positioning"]["focusing_plants"].is_null()) {
+            focusing_plants = cam_prop_json["positioning"]["focusing_plants"].get<bool>();
+            std::cout << "[DEBUG] focusing_plants = " << focusing_plants << std::endl;
         } else {
-            std::cout << "[DEBUG] center_plants key not found or null, using default: false" << std::endl;
+            std::cout << "[DEBUG] focusing_plants key not found or null, using default: false" << std::endl;
         }
     } catch (const std::exception& e) {
-        std::cerr << "[ERROR] Failed to read camera_positioning.center_plants: " << e.what() << std::endl;
+        std::cerr << "[ERROR] Failed to read camera.positioning.focusing_plants: " << e.what() << std::endl;
         std::cerr << "[ERROR] Using default value: false" << std::endl;
     }
     
-    if (center_plants) {
+    if (focusing_plants) {
         // Get bounding box from plant base positions for more accurate centering
         vec3 min_corner = make_vec3(std::numeric_limits<float>::max(), 
                                     std::numeric_limits<float>::max(), 
@@ -165,14 +174,14 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
 
     // Convert azimuth angle from degrees to radians
     float azimuth_rad =
-        deg2rad(cam_prop_json["camera_positioning"]
+        deg2rad(cam_prop_json["positioning"]
                               ["azimuth_angle"]
                                   .get<float>());
                                 // Assuming looking the x axis direction
                                 // towards zero when azimuth_angle=0
 
     // Calculate camera position based on plant canopy center
-    float dist = cam_prop_json["camera_positioning"]
+    float dist = cam_prop_json["positioning"]
                                       ["distance_from_center"]
                                           .get<float>();
     
@@ -181,21 +190,20 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     setup.camera_position.x = canopy_center.x + dist*sin(azimuth_rad); 
     setup.camera_position.y = canopy_center.y - dist*cos(azimuth_rad);
     setup.camera_position.z =
-        cam_prop_json["camera_height"]
+        cam_prop_json["positioning"]["camera_height"]
             .get<float>();
 
     // Calculate camera lookat point (slightly offset from canopy center)
-    setup.camera_lookat.x = canopy_center.x + cam_prop_json["camera_positioning"]
+    setup.camera_lookat.x = canopy_center.x + cam_prop_json["positioning"]
                         ["lookat_offset_x"].get<float>();
-    setup.camera_lookat.y = canopy_center.y + cam_prop_json["camera_positioning"]
+    setup.camera_lookat.y = canopy_center.y + cam_prop_json["positioning"]
                         ["lookat_offset_y"].get<float>();
-    setup.camera_lookat.z = canopy_center.z + cam_prop_json["camera_positioning"]
-                        ["lookat_offset_z"].get<float>();
+    setup.camera_lookat.z = canopy_center.z + cam_prop_json["positioning"] ["lookat_offset_z"].get<float>();
 
     setup.sun_dir = make_SphericalCoord(
-        deg2rad(sampled_params["sun_position"]["elevation_degrees"]
+        deg2rad(sampled_params["environment"]["sun"]["elevation_degrees"]
                     .get<float>()),
-        -deg2rad(sampled_params["sun_position"]["azimuth_degrees"]
+        -deg2rad(sampled_params["environment"]["sun"]["azimuth_degrees"]
                      .get<float>()));
     
     return setup;
@@ -207,7 +215,7 @@ void update_leafoptics(Context &context,
                         json sampled_params) {
     
     // Extract leaf specular exponent from JSON with default value
-    float leaf_specular = sampled_params["leafoptics"].value("specular_exponent", 2.0f);
+    float leaf_specular = sampled_params["plant_properties"]["leaf_optics"].value("specular_exponent", 2.0f);
     
     // Get plantarchitecture plant ids
     std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
@@ -295,6 +303,7 @@ void update_leafoptics(Context &context,
 
 
 void init_spectral_data(Context &context,
+                          std::string cameralabel,
                           RadiationModel &radiation,
                           PlantArchitecture &plantarchitecture,
                           LeafOptics& leafoptics,
@@ -307,7 +316,9 @@ void init_spectral_data(Context &context,
     3. Using leaf optics model
     */
 
-    auto radiation_cfg = sampled_params["radiationmodel"];
+    // Note: spectral data configuration is now under environment.soil
+    auto soil_cfg = sampled_params["environment"]["soil"];
+    auto radiation_cfg = json::object(); // Placeholder for backward compatibility
     
     // Part 1: load color and reflectivity data from XML
     std::string colorboard_file = radiation_cfg.value(
@@ -328,9 +339,9 @@ void init_spectral_data(Context &context,
 
     // Load soil surface spectral data with default value
     std::string soil_spectral_file;
-    if (radiation_cfg.contains("soil_surface_spectral_data") && 
-        radiation_cfg["soil_surface_spectral_data"].contains("file")) {
-        soil_spectral_file = radiation_cfg["soil_surface_spectral_data"]["file"].get<std::string>();
+    if (soil_cfg.contains("spectral_data") && 
+        soil_cfg["spectral_data"].contains("file")) {
+        soil_spectral_file = soil_cfg["spectral_data"]["file"].get<std::string>();
     } else {
         soil_spectral_file = "plugins/radiation/spectral_data/soil_surface_spectral_library.xml";
     }
@@ -368,40 +379,38 @@ void init_spectral_data(Context &context,
 
     std::vector<std::string> bandlabels = {"red", "green", "blue"};
     radiation.setDiffuseSpectrum("solar_spectrum_diffuse_ASTMG173");
-
-    std::string cameralabel = "camera";    
+   
     // add the camera to the radiation model
     radiation.addRadiationCamera(cameralabel, bandlabels, camera_setup.camera_position,
                                  camera_setup.camera_lookat, camera_setup.cam_prop, 100);
 
     // set camera spectral response to simulate iPhone camera
-    std::string camera_spectral_file = radiation_cfg["camera_spectral_data"].value(
-        "file", "plugins/radiation/spectral_data/camera_spectral_library.xml");
-    context.loadXML(camera_spectral_file.c_str(), true);
-    std::string camera_type =
-        radiation_cfg["camera_spectral_data"]["camera_type"]
-            .get<std::string>();
+    auto camera_cfg = sampled_params["camera"]["sensor"];
+    std::string camera_spectral_library = "plugins/radiation/spectral_data/camera_spectral_library.xml";
+    context.loadXML(camera_spectral_library.c_str(), true);
+    std::string camera_model = camera_cfg["model"].get<std::string>();
     radiation.setCameraSpectralResponse(cameralabel, "red",
-                                        (camera_type + "_red").c_str());
+                                        (camera_model + "_red").c_str());
     radiation.setCameraSpectralResponse(cameralabel, "green",
-                                        (camera_type + "_green").c_str());
+                                        (camera_model + "_green").c_str());
     radiation.setCameraSpectralResponse(cameralabel, "blue",
-                                        (camera_type + "_blue").c_str());
+                                        (camera_model + "_blue").c_str());
 
 
     // Part 3: Leaf optics
     // Initialize leaf optics properties with fitted parameters
     LeafOpticsProperties leafopticsprops;
     leafoptics.getPropertiesFromLibrary("prospect", leafopticsprops);
-    leafopticsprops.numberlayers = sampled_params["leafoptics"].value("number_layers", 1.5824);
-    leafopticsprops.chlorophyllcontent = sampled_params["leafoptics"].value("chlorophyll_content", 37.4129);
-    leafopticsprops.carotenoidcontent = sampled_params["leafoptics"].value("carotenoid_content", 12.2658);
-    leafopticsprops.anthocyancontent = sampled_params["leafoptics"].value("anthocyan_content", 0.958622);
-    leafopticsprops.brownpigments = sampled_params["leafoptics"].value("brown_pigments", 0.01339);
-    leafopticsprops.watermass = sampled_params["leafoptics"].value("water_mass", 0.01346);
-    leafopticsprops.drymass = sampled_params["leafoptics"].value("dry_mass", 0.00315556);
-    leafopticsprops.protein = sampled_params["leafoptics"].value("protein", 0.0);
-    leafopticsprops.carbonconstituents = sampled_params["leafoptics"].value("carbon_constituents", 0.0);
+    auto leaf_opt = sampled_params["plant_properties"]["leaf_optics"];
+    leafopticsprops.numberlayers = leaf_opt.value("number_layers", 1.5824);
+    leafopticsprops.chlorophyllcontent = leaf_opt.value("chlorophyll_content", 37.4129);
+    leafopticsprops.carotenoidcontent = leaf_opt.value("carotenoid_content", 12.2658);
+    leafopticsprops.anthocyancontent = leaf_opt.value("anthocyan_content", 0.958622);
+    leafopticsprops.brownpigments = leaf_opt.value("brown_pigments", 0.01339);
+    leafopticsprops.watermass = leaf_opt.value("water_mass", 0.01346);
+    leafopticsprops.drymass = leaf_opt.value("dry_mass", 0.00315556);
+    leafopticsprops.protein = leaf_opt.value("protein", 0.0);
+    leafopticsprops.carbonconstituents = leaf_opt.value("carbon_constituents", 0.0);
 
     // Run cowpea model to generate leaf_reflectivity_prospect and leaf_transmissivity_prospect
     leafoptics.run(leafopticsprops, "prospect");
@@ -569,14 +578,6 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
     return options;
 }
 
-#define CUDA_CHECK_ERROR() { \
-    optix::cudaError_t err = optix::cudaGetLastError(); \
-    if (err != optix::cudaSuccess) { \
-        std::cerr << "CUDA Error: " << optix::cudaGetErrorString(err) \
-                  << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
-        exit(EXIT_FAILURE); \
-    } \
-}
 
 // System RAM monitoring function
 inline void printSystemMemoryUsage(const std::string& label = "") {
@@ -609,7 +610,6 @@ inline void printGPUMemoryUsage(const std::string& label = "") {
     if (!g_debug_mode) return;
     
     size_t free_mem, total_mem;
-    optix::cudaMemGetInfo(&free_mem, &total_mem);
     size_t used_mem = total_mem - free_mem;
     
     std::cout << "[DEBUG][GPU Memory" << (label.empty() ? "" : " - " + label) << "] "
@@ -629,7 +629,7 @@ int main(int argc, char *argv[]) {
     if (args.params_file.size() > 0) {
         params_file = args.params_file;
     } else {
-        params_file = "../dap_10_plot_2_12_0000_Method5_+Grounding.json";
+        params_file = "../params.json";
     }
     std::cout << "Loading " << params_file << std::endl;
     json json_params = loadParametersFromJson(params_file);
@@ -671,12 +671,14 @@ int main(int argc, char *argv[]) {
     // Get output name
     std::string output_name = args.output_name.size() > 0 ? args.output_name : "plot";
 
-    // Save the original parameters once (shared across all crops)
-    std::ofstream original_params_file(output_dir + "/original_params.json");
-    original_params_file << std::setw(4) << json_params << std::endl;
-    original_params_file.close();
-    std::cout << "Saved original parameters to: original_params.json"
-              << std::endl;
+    if (g_debug_mode) {
+        // Save the original parameters once (shared across all crops)
+        std::ofstream original_params_file(output_dir + "/original_params.json");
+        original_params_file << std::setw(4) << json_params << std::endl;
+        original_params_file.close();
+        std::cout << "Saved original parameters to: original_params.json"
+        << std::endl;
+    }
 
     // Dry-run mode: validate JSON structure and exit without running generation
     if (args.dry_run) {
@@ -686,8 +688,8 @@ int main(int argc, char *argv[]) {
         
         // Check required top-level keys
         std::vector<std::string> required_keys = {
-            "seed", "field", "sun_position", "plantarchitecture",
-            "cameraproperties", "radiationmodel", "leafoptics"
+            "seed", "metadata", "environment", "field",
+            "plant_properties", "camera"
         };
         
         bool all_keys_present = true;
@@ -698,93 +700,144 @@ int main(int argc, char *argv[]) {
             if (!present) all_keys_present = false;
         }
         
+        // Check metadata sub-keys
+        std::cout << "\nChecking metadata parameters:" << std::endl;
+        if (json_params.contains("metadata")) {
+            auto& metadata = json_params["metadata"];
+            std::vector<std::string> metadata_keys = {"plant_type", "dap", "year", "location"};
+            for (const auto& key : metadata_keys) {
+                bool present = metadata.contains(key);
+                std::cout << "  metadata." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
+                if (key == "plant_type" || key == "dap") {
+                    if (!present) all_keys_present = false;
+                }
+            }
+        }
+        
         // Check field sub-keys
         std::cout << "\nChecking field parameters:" << std::endl;
         if (json_params.contains("field")) {
             auto& field = json_params["field"];
-            std::vector<std::string> field_keys = {"plant_type", "plant_age", "plot_shape", "mode", "plants"};
+            std::vector<std::string> field_keys = {"layout", "plots"};
             for (const auto& key : field_keys) {
                 bool present = field.contains(key);
                 std::cout << "  field." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
                 if (!present) all_keys_present = false;
             }
             
-            // Check plot_shape sub-keys
-            if (field.contains("plot_shape")) {
-                auto& plot_shape = field["plot_shape"];
-                std::vector<std::string> plot_keys = {"size_x", "size_y", "size_z"};
-                for (const auto& key : plot_keys) {
-                    bool present = plot_shape.contains(key);
-                    std::cout << "  field.plot_shape." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
+            // Check layout sub-keys
+            if (field.contains("layout")) {
+                auto& layout = field["layout"];
+                std::cout << "  field.layout.mode: " << (layout.contains("mode") ? "✓ present" : "⚠ missing") << std::endl;
+                if (layout.contains("sampling")) {
+                    auto& sampling = layout["sampling"];
+                    std::vector<std::string> sampling_keys = {"plot_size_x", "plot_size_y", "plot_size_z"};
+                    for (const auto& key : sampling_keys) {
+                        bool present = sampling.contains(key);
+                        std::cout << "  field.layout.sampling." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
+                    }
                 }
             }
             
-            // Check plants array
-            if (field.contains("plants") && field["plants"].is_array()) {
-                int num_plants = field["plants"].size();
-                std::cout << "  field.plants: " << num_plants << " plant(s) defined" << std::endl;
+            // Check plots array
+            if (field.contains("plots") && field["plots"].is_array()) {
+                int num_plots = field["plots"].size();
+                std::cout << "  field.plots: " << num_plots << " plot(s) defined" << std::endl;
                 
-                // Check first plant structure as sample
-                if (num_plants > 0) {
-                    auto& first_plant = field["plants"][0];
-                    std::vector<std::string> plant_keys = {"bed", "row", "x", "y"};
-                    std::cout << "  Sample plant[0] structure:" << std::endl;
-                    for (const auto& key : plant_keys) {
-                        bool present = first_plant.contains(key);
-                        std::cout << "    " << key << ": " << (present ? "✓" : "✗") << std::endl;
+                // Check first plot structure as sample
+                if (num_plots > 0) {
+                    auto& first_plot = field["plots"][0];
+                    std::cout << "  Sample plots[0] structure:" << std::endl;
+                    std::cout << "    bed: " << (first_plot.contains("bed") ? "✓" : "✗") << std::endl;
+                    std::cout << "    row: " << (first_plot.contains("row") ? "✓" : "✗") << std::endl;
+                    if (first_plot.contains("plants") && first_plot["plants"].is_array() && first_plot["plants"].size() > 0) {
+                        auto& first_plant = first_plot["plants"][0];
+                        std::cout << "    plants[0].x: " << (first_plant.contains("x") ? "✓" : "✗") << std::endl;
+                        std::cout << "    plants[0].y: " << (first_plant.contains("y") ? "✓" : "✗") << std::endl;
                     }
                 }
             }
         }
         
-        // Check sun_position
-        std::cout << "\nChecking sun_position parameters:" << std::endl;
-        if (json_params.contains("sun_position")) {
-            auto& sun = json_params["sun_position"];
-            std::vector<std::string> sun_keys = {"elevation_degrees", "azimuth_degrees"};
-            for (const auto& key : sun_keys) {
-                bool present = sun.contains(key);
-                std::cout << "  sun_position." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
-            }
-        }
-        
-        // Check cameraproperties
-        std::cout << "\nChecking cameraproperties:" << std::endl;
-        if (json_params.contains("cameraproperties")) {
-            auto& cam = json_params["cameraproperties"];
-            std::vector<std::string> cam_keys = {"camera_height", "HFOV", "camera_resolution_x", "camera_resolution_y"};
-            for (const auto& key : cam_keys) {
-                bool present = cam.contains(key);
-                std::cout << "  cameraproperties." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
-            }
-        }
-        
-        // Check leafoptics (PROSPECT model parameters)
-        std::cout << "\nChecking leafoptics (PROSPECT model):" << std::endl;
-        if (json_params.contains("leafoptics")) {
-            auto& leaf = json_params["leafoptics"];
-            std::vector<std::string> leaf_keys = {
-                "number_layers", "chlorophyll_content", "carotenoid_content",
-                "anthocyan_content", "brown_pigments", "water_mass", "dry_mass"
-            };
-            for (const auto& key : leaf_keys) {
-                bool present = leaf.contains(key);
-                std::cout << "  leafoptics." << key << ": " << (present ? "✓ present" : "⚠ missing (will use default)") << std::endl;
-            }
-        }
-        
-        // Check plantarchitecture
-        std::cout << "\nChecking plantarchitecture:" << std::endl;
-        if (json_params.contains("plantarchitecture")) {
-            auto& arch = json_params["plantarchitecture"];
-            if (arch.contains("phytomer_parameters")) {
-                std::cout << "  plantarchitecture.phytomer_parameters: ✓ present" << std::endl;
-                if (arch["phytomer_parameters"].contains("leaf_pitch")) {
-                    std::cout << "  plantarchitecture.phytomer_parameters.leaf_pitch: ✓ present" << std::endl;
+        // Check environment
+        std::cout << "\nChecking environment parameters:" << std::endl;
+        if (json_params.contains("environment")) {
+            auto& env = json_params["environment"];
+            std::cout << "  environment.sun: " << (env.contains("sun") ? "✓ present" : "✗ MISSING") << std::endl;
+            std::cout << "  environment.soil: " << (env.contains("soil") ? "✓ present" : "✗ MISSING") << std::endl;
+            
+            if (env.contains("sun")) {
+                auto& sun = env["sun"];
+                std::vector<std::string> sun_keys = {"elevation_degrees", "azimuth_degrees", "shadow"};
+                for (const auto& key : sun_keys) {
+                    bool present = sun.contains(key);
+                    std::cout << "  environment.sun." << key << ": " << (present ? "✓ present" : "✗ MISSING") << std::endl;
                 }
             }
-            if (arch.contains("flower_bud_break_probability")) {
-                std::cout << "  plantarchitecture.flower_bud_break_probability: ✓ present" << std::endl;
+            
+            if (env.contains("soil")) {
+                auto& soil = env["soil"];
+                std::cout << "  environment.soil.spectral_data: " << (soil.contains("spectral_data") ? "✓ present" : "⚠ missing") << std::endl;
+            }
+        }
+        
+        // Check camera
+        std::cout << "\nChecking camera parameters:" << std::endl;
+        if (json_params.contains("camera")) {
+            auto& cam = json_params["camera"];
+            std::cout << "  camera.sensor: " << (cam.contains("sensor") ? "✓ present" : "✗ MISSING") << std::endl;
+            std::cout << "  camera.positioning: " << (cam.contains("positioning") ? "✓ present" : "✗ MISSING") << std::endl;
+            
+            if (cam.contains("sensor")) {
+                auto& sensor = cam["sensor"];
+                std::vector<std::string> sensor_keys = {"resolution_x", "resolution_y", "focal_plane_distance_difference", "lens_diameter"};
+                for (const auto& key : sensor_keys) {
+                    bool present = sensor.contains(key);
+                    std::cout << "  camera.sensor." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
+                }
+            }
+            
+            if (cam.contains("positioning")) {
+                auto& pos = cam["positioning"];
+                std::vector<std::string> pos_keys = {"camera_height", "azimuth_angle", "distance_from_center"};
+                for (const auto& key : pos_keys) {
+                    bool present = pos.contains(key);
+                    std::cout << "  camera.positioning." << key << ": " << (present ? "✓ present" : "⚠ missing") << std::endl;
+                }
+            }
+        }
+        
+        // Check plant_properties (PROSPECT model parameters)
+        std::cout << "\nChecking plant_properties:" << std::endl;
+        if (json_params.contains("plant_properties")) {
+            auto& plant_props = json_params["plant_properties"];
+            std::cout << "  plant_properties.leaf_optics: " << (plant_props.contains("leaf_optics") ? "✓ present" : "✗ MISSING") << std::endl;
+            std::cout << "  plant_properties.architecture: " << (plant_props.contains("architecture") ? "✓ present" : "✗ MISSING") << std::endl;
+            
+            if (plant_props.contains("leaf_optics")) {
+                auto& leaf = plant_props["leaf_optics"];
+                std::vector<std::string> leaf_keys = {
+                    "number_layers", "chlorophyll_content", "carotenoid_content",
+                    "anthocyan_content", "brown_pigments", "water_mass", "dry_mass"
+                };
+                for (const auto& key : leaf_keys) {
+                    bool present = leaf.contains(key);
+                    std::cout << "  plant_properties.leaf_optics." << key << ": " << (present ? "✓ present" : "⚠ missing (will use default)") << std::endl;
+                }
+            }
+            
+            if (plant_props.contains("architecture")) {
+                auto& arch = plant_props["architecture"];
+                if (arch.contains("phytomer_parameters")) {
+                    std::cout << "  plant_properties.architecture.phytomer_parameters: ✓ present" << std::endl;
+                    auto& phyto = arch["phytomer_parameters"];
+                    if (phyto.contains("leaf_pitch")) {
+                        std::cout << "  plant_properties.architecture.phytomer_parameters.leaf_pitch: ✓ present" << std::endl;
+                    }
+                }
+                if (arch.contains("flower_bud_break_probability")) {
+                    std::cout << "  plant_properties.architecture.flower_bud_break_probability: ✓ present" << std::endl;
+                }
             }
         }
         
@@ -807,8 +860,8 @@ int main(int argc, char *argv[]) {
     auto field = json_params["field"];
     // Parse generation mode
     GenerationMode mode = GenerationMode::UNKNOWN;
-    if (field.contains("mode") && field["mode"].is_string()) {
-        mode = parseGenerationMode(field["mode"].get<std::string>());
+    if (field.contains("layout") && field["layout"].contains("mode") && field["layout"]["mode"].is_string()) {
+        mode = parseGenerationMode(field["layout"]["mode"].get<std::string>());
     }
 
     // Declare context
@@ -821,24 +874,6 @@ int main(int argc, char *argv[]) {
     PlantArchitecture plantarchitecture(&context);
 
     for (int i = 0; i < num_iterations; ++i) {
-        // Notes:
-        // Recursively add "sampled" values to all parameters
-        // But the problem here is some keys need to be sampled, but some are already determined
-        // Final json will only have determined value without min, max, sampling, sampled keys
-        // Another problem is it don't force the types, such as float and uint
-        // Also num columns vs num beds, numb rows are not consistent
-        // plant architecture initialize need to be moved, like auto or manual
-        // ground also need to be moved
-        // Also manual and auto config are confusing. The final output will only have determied 'crops'
-        // In auto mode, use auto config to geneate plots and remove the config
-        // In manual mode, use the predefined plots 
-        // If double row plant thing in auto mode, it will double the nuber ofplants
-        // Changed the field size to populate (or cover) all the plants
-        // Changes FOV to cover entire field => Actually FOV is pre-calculated from python
-        // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
-        // auto_config will be deleted when pythpn geneates it
-        // Ran
-
         json sampled_params;
         sampled_params = sampleParams(json_params, rng);
 
@@ -852,8 +887,9 @@ int main(int argc, char *argv[]) {
 
 
         // Set camera
+        //std::string cameralabel = "camera";
+        std::string cameralabel = filename;
         CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
-        CameraProperties cam_prop = camera_setup.cam_prop;
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
         SphericalCoord sun_dir = camera_setup.sun_dir;
@@ -861,7 +897,7 @@ int main(int argc, char *argv[]) {
         // Init spectra
         if (args.run_radiation) {
             // Initialize the radiation model
-            init_spectral_data(context, radiation, plantarchitecture,
+            init_spectral_data(context, cameralabel, radiation, plantarchitecture,
                                 leafoptics, camera_setup, sampled_params);
         }
 
@@ -869,57 +905,29 @@ int main(int argc, char *argv[]) {
         std::vector<uint> UUIDs_ground;
         
         // Check if use_obj_ground key exists and is not null
-        bool use_obj_ground = false;
-        try {
-            if (sampled_params.contains("field") &&
-                sampled_params["field"].contains("plot_shape") &&
-                sampled_params["field"]["plot_shape"].contains("use_obj_ground") &&
-                !sampled_params["field"]["plot_shape"]["use_obj_ground"].is_null()) {
-                use_obj_ground = sampled_params["field"]["plot_shape"]["use_obj_ground"].get<bool>();
-                std::cout << "[DEBUG] use_obj_ground = " << use_obj_ground << std::endl;
-            } else {
-                std::cout << "[DEBUG] field.plot_shape.use_obj_ground key not found or null, using default: false" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[ERROR] Failed to read field.plot_shape.use_obj_ground: " << e.what() << std::endl;
-            std::cerr << "[ERROR] Using default value: false" << std::endl;
-        }
-        
+        bool use_obj_ground = sampled_params["environment"]["soil"]["use_obj_ground"];
         if (use_obj_ground) {
             UUIDs_ground = make_field(context, sampled_params);
         } else {
             // Calculate pixel size on ground based on camera FOV and resolution from params
-            auto cam_prop = sampled_params["cameraproperties"];
-            float camera_height = cam_prop["camera_height"].get<float>();
-            int camera_res_x = cam_prop["camera_resolution_x"].get<int>();
-            int camera_res_y = cam_prop["camera_resolution_y"].get<int>();
+            auto cam_config = sampled_params["camera"];
+            float camera_height = cam_config["positioning"]["camera_height"].get<float>();
+            int camera_res_x = cam_config["sensor"]["resolution_x"].get<int>();
+            int camera_res_y = cam_config["sensor"]["resolution_y"].get<int>();
             
-#if 1
             // load dirt texture with fixed size (original method)
-            float ground_x = sampled_params["field"]["size_x"].get<float>() * 1.05; // 5 percent buffer
-            float ground_y = sampled_params["field"]["size_y"].get<float>() * 1.05; // 5 percent buffer
-#else   
-            float HFOV = cam_prop["HFOV"].get<float>();
-            float HFOV_rad = deg2rad(HFOV);
-            // Fix HFOV, and get the VFOV based on image ratio
-            float VFOV = HFOVtoVFOV(HFOV, float(camera_res_x) / float(camera_res_y));
-            float VFOV_rad = deg2rad(VFOV);
-            
-            // Ground coverage in each dimension
-            float ground_width_visible = 2.0f * camera_height * tan(HFOV_rad / 2.0f);
-            float ground_height_visible = 2.0f * camera_height * tan(VFOV_rad / 2.0f);
-            // Automatically calculate ground size
-            float ground_x = ground_width_visible * 1.05; // 5 percent buffer
-            float ground_y = ground_height_visible * 1.05; // 5 percent buffer
-#endif
+            // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
+            float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 1.05; // 5 percent buffer
+            float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 1.05; // 5 percent buffer
+
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
             helios::vec2 field_size = make_vec2(ground_x, ground_y);
 
             // Pixel size on ground
-            float pixel_size_x = ground_x / camera_res_x;
-            float pixel_size_y = ground_y / camera_res_y;
-            float pixel_size = std::max(pixel_size_x, pixel_size_y);
+            float pixel_plot_size_x = ground_x / camera_res_x;
+            float pixel_plot_size_y = ground_y / camera_res_y;
+            float pixel_size = std::max(pixel_plot_size_x, pixel_plot_size_y);
             
             // Set patch size to be smaller than pixel size (half pixel for good sampling)
             float desired_patch_size = pixel_size * 0.5f;
@@ -954,43 +962,45 @@ int main(int argc, char *argv[]) {
         // Set default color for soil
         context.setPrimitiveData(
             UUIDs_ground, "reflectivity_spectrum",
-            sampled_params["radiationmodel"]["soil_surface_spectral_data"]
+            sampled_params["environment"]["soil"]["spectral_data"]
                         ["reflectivity"]
                             .get<std::string>());
         // Make the ground plane single-sided (only visible from above)
         context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
         // Set ground specular exponent from JSON
-        float ground_specular = sampled_params["field"]["plot_shape"].value("specular_exponent", 5.0f);
+        float ground_specular = sampled_params["environment"]["soil"].value("specular_exponent", 5.0f);
         context.setPrimitiveData(UUIDs_ground, "specular_exponent", ground_specular);
 
         // Create multiple plots in a grid pattern
         std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
         if (mode == GenerationMode::AUTO) {
             // Auto plot generation - Earl
+            // In auto mode, use auto config to geneate plots and remove the config
+            // If double row plant thing in auto mode, it will double the nuber of plants?
             init_plant_architecture(plantarchitecture, sampled_params);
-            auto auto_planting_cfg = sampled_params["field"]["auto_config"];
+            auto auto_planting_cfg = sampled_params["field"]["layout"]["sampling"];
             // Calculate grid positioning to center all plots
             int num_beds = auto_planting_cfg["num_beds"].get<int>();
             int num_rows = auto_planting_cfg["num_rows"].get<int>();
-            float plot_spacing_x =
-                auto_planting_cfg["plot_spacing_x"].get<float>();
-            float plot_spacing_y =
-                auto_planting_cfg["plot_spacing_y"].get<float>();
-            float total_size_x = num_beds * plot_spacing_x;
-            float total_size_y = num_rows * plot_spacing_y;
+            float plot_size_x =
+                auto_planting_cfg["plot_size_x"].get<float>();
+            float plot_size_y =
+                auto_planting_cfg["plot_size_y"].get<float>();
+            float total_plot_size_x = num_beds * plot_size_x;
+            float total_plot_size_y = num_rows * plot_size_y;
             std::cout << "Creating " << num_beds << "x"
                       << num_rows << " plot grid..." << std::endl;
 
-            float start_x = -total_size_x / 2.0f;
-            float start_y = -total_size_y / 2.0f;
+            float start_x = -total_plot_size_x / 2.0f;
+            float start_y = -total_plot_size_y / 2.0f;
 
             // Create plants for this plot
             json plots_array = json::array();
             for (int row = 0; row < num_rows; row++) {
                 for (int bed = 0; bed < num_beds; bed++) {
                     // Calculate center position for this plot
-                    float plot_x = start_x + bed * plot_spacing_x;
-                    float plot_y = start_y + row * plot_spacing_y;
+                    float plot_x = start_x + bed * plot_size_x;
+                    float plot_y = start_y + row * plot_size_y;
 
                     std::vector<uint> plot_plant_IDs =
                         plantarchitecture.buildPlantCanopyFromLibrary(
@@ -1036,55 +1046,28 @@ int main(int argc, char *argv[]) {
             sampled_params["field"]["num_rows"] = num_rows;
             
             // Update field size and plot size
-            sampled_params["field"]["size_x"] = plot_spacing_x * num_beds;
-            sampled_params["field"]["size_y"] = plot_spacing_y * num_rows;
-            sampled_params["field"]["plot_shape"]["size_x"] = plot_spacing_x;
-            sampled_params["field"]["plot_shape"]["size_y"] = plot_spacing_y;
-
-
+            sampled_params["field"]["plot_size_x"] = plot_size_x;
+            sampled_params["field"]["plot_size_y"] = plot_size_y;
+            
         } else if (mode == GenerationMode::MANUAL) {
             // Manual plot generation - Heesup
-            // Support both "size_x"/"width" and "size_y"/"length" field names
-            float size_x = 3.0f;  // default
-            float size_y = 6.0f; // default
+            // In manual mode, use the predefined plots 
+            // Support both "plot_size_x"/"width" and "plot_size_y"/"length" field names
+            float plot_size_x = 3.0f;  // default
+            float plot_size_y = 6.0f; // default
 
-            // Remove auto_config key in manual mode before saving
+            // Remove auto_sampling key in manual mode before saving
             if (mode == GenerationMode::MANUAL && sampled_params.contains("field") && 
-                sampled_params["field"].contains("auto_config")) {
-                sampled_params["field"].erase("auto_config");
+                sampled_params["field"].contains("layout") && 
+                sampled_params["field"]["layout"].contains("sampling")) {
+                // auto_sampling will be deleted when python geneates it
+                sampled_params["field"]["layout"].erase("sampling");
             }
-            
-            try {
-                auto& plot_shape = sampled_params["field"]["plot_shape"];
-                
-                // Try size_x first, then width, else use default
-                if (plot_shape.contains("size_x") && !plot_shape["size_x"].is_null()) {
-                    size_x = plot_shape["size_x"].get<float>();
-                    std::cout << "[DEBUG] Using size_x = " << size_x << std::endl;
-                } else if (plot_shape.contains("width") && !plot_shape["width"].is_null()) {
-                    size_x = plot_shape["width"].get<float>();
-                    std::cout << "[DEBUG] Using width = " << size_x << std::endl;
-                } else {
-                    std::cout << "[DEBUG] size_x/width not found, using default: " << size_x << std::endl;
-                }
-                
-                // Try size_y first, then length, else use default
-                if (plot_shape.contains("size_y") && !plot_shape["size_y"].is_null()) {
-                    size_y = plot_shape["size_y"].get<float>();
-                    std::cout << "[DEBUG] Using size_y = " << size_y << std::endl;
-                } else if (plot_shape.contains("length") && !plot_shape["length"].is_null()) {
-                    size_y = plot_shape["length"].get<float>();
-                    std::cout << "[DEBUG] Using length = " << size_y << std::endl;
-                } else {
-                    std::cout << "[DEBUG] size_y/length not found, using default: " << size_y << std::endl;
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "[ERROR] Failed to read size_x/size_y: " << e.what() << std::endl;
-                std::cerr << "[ERROR] Using default values: width=" << size_x << ", length=" << size_y << std::endl;
-            }
-            
-            int num_beds = sampled_params["field"]["num_beds"];
-            int num_rows = sampled_params["field"]["num_rows"];
+            auto& plot_shape = sampled_params["field"]["layout"];
+            plot_size_x = plot_shape["plot_size_x"].get<float>();
+            plot_size_y = plot_shape["plot_size_y"].get<float>();
+            int num_beds = plot_shape["num_beds"];
+            int num_rows = plot_shape["num_rows"];
 
             // params.json only have single plant type within plot for now
             // Get crop type and convert to lowercase for plant library
@@ -1105,8 +1088,8 @@ int main(int argc, char *argv[]) {
 
                     float X = selected_crop["x"];
                     float Y = selected_crop["y"];
-                    origin.x = (bed-1) * size_x;    // plant locations are now absolte, need to be removed?
-                    origin.y = (row-1) * size_y; 
+                    origin.x = (bed-1) * plot_size_x;    // plant locations are now absolte, need to be removed?
+                    origin.y = (row-1) * plot_size_y; 
                     // float Z = config["crops"][i]["Z"].as<float>();
                     //vec3 plant_origin = origin + make_vec3(X, Y, 0);
                     vec3 plant_origin = make_vec3(X, Y, 0); // Use absolute XY
@@ -1144,16 +1127,16 @@ int main(int argc, char *argv[]) {
         // Age only plants that were built from library (not from XML)
         if (!plant_IDs_aging.empty()) {
             // plants are planted in a single day -> Age all together
-            // Therefore there is no plant_age in plants element
-            float plant_age = static_cast<int>(sampled_params["field"]["plant_age"]);
-            if (plant_age > 0) {
-                //plantarchitecture.advanceTime(plant_IDs_aging, plant_age);
+            // Therefore there is no dap in plants element
+            float dap = static_cast<int>(sampled_params["metadata"]["dap"]);
+            if (dap > 0) {
+                //plantarchitecture.advanceTime(plant_IDs_aging, dap);
                 int days_per_update = 2;
-                for(int day = 0; day < plant_age/days_per_update;day++){
+                for(int day = 0; day < dap/days_per_update;day++){
                     plantarchitecture.advanceTime(plant_IDs_aging, days_per_update);
                     update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
                 }
-                std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << plant_age
+                std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << dap
                           << " days" << std::endl;
             }
         }
@@ -1219,6 +1202,7 @@ int main(int argc, char *argv[]) {
         // Render the visualizer image to file if enabled via CLI flag
         if (args.vis || args.gui) {
             printGPUMemoryUsage("Before visualizer init");
+            CameraProperties cam_prop = camera_setup.cam_prop;
             Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
             vis.clearGeometry();
             vis.hideWatermark();
@@ -1226,7 +1210,7 @@ int main(int argc, char *argv[]) {
             
             // set up sun lighting
             vis.setLightDirection(sphere2cart(sun_dir));
-            if (sampled_params["sun_position"].value("shadow", true)) {
+            if (sampled_params["environment"]["sun"].value("shadow", true)) {
                 vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
             } else {
                 vis.setLightingModel(Visualizer::LIGHTING_PHONG);
@@ -1257,23 +1241,21 @@ int main(int argc, char *argv[]) {
         // Run radiation model by default true
         if (args.run_radiation) {
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
-            std::string cameralabel = "camera";
-
+            radiation.enableCameraMetadata(cameralabel);
+            // Change camera_RGB_00000.json to specific name like plot_20_13_0000_camera.json
             // update geometry and run radiation model
             if (g_debug_mode) std::cout << "[DEBUG] Updating radiation geometry..." << std::endl;
             radiation.updateGeometry();
             printSystemMemoryUsage("After updateGeometry");
             printGPUMemoryUsage("After updateGeometry");
             printGPUMemoryUsage("After updateGeometry");
-            CUDA_CHECK_ERROR();
 
             if (g_debug_mode) std::cout << "[DEBUG] Running radiation bands..." << std::endl;
             radiation.runBand(bandlabels);
             
-            
             // process image using standard pipeline
-            // radiation.applyCameraImageCorrections(cameralabel, "red", "green",
-            //     "blue", 1.0, 0.5, 1.0);
+            radiation.applyCameraImageCorrections(cameralabel, "red", "green",
+                 "blue", 1.0, 1.0, 1.0);
             printGPUMemoryUsage("After runBand");
             
             // save rendered RGB image with custom filename
@@ -1303,12 +1285,12 @@ int main(int argc, char *argv[]) {
 
             // Export bounding boxes and segmentation masks in COCO format
             radiation.writeImageBoundingBoxes(cameralabel, {"plant", "flower", "pod"},
-                                              {0, 1, 2}, image_file, "classes.txt",
+                                              {0, 1, 2}, output_dir + "/" + filename +"_boxes", cameralabel+"_classes.txt",
                                               output_dir + '/');
 
             radiation.writeImageSegmentationMasks(
                 cameralabel, {"plant", "flower", "pod"}, {0, 1, 2},
-                output_dir + '/' + filename + "_labels.json", image_file);
+                output_dir + '/' + filename + "_masks.json", image_file);
 
             // auto-calibrate camera using colorboard reference values with
             // quality report (only if user enabled calibration)
@@ -1319,9 +1301,29 @@ int main(int argc, char *argv[]) {
                     output_dir + '/' + filename + ".jpeg", true);
             }
 
-            // Export camera parameters
-            // radiation.setCameraMetadata()
-            // radiation.writeCameraMetadataFile(cameralabel, output_dir + '/' + filename + "_camera.json");
+            // Rename automatically created camera_RGB_00000.json to custom name
+            try {
+                std::string default_camera_file = output_dir + "/" + cameralabel + "_RGB_00000.json";
+                std::string target_camera_path = output_dir + "/" + filename + "_camera.json";
+                
+                if (fs::exists(default_camera_file)) {
+                    fs::path src(default_camera_file);
+                    fs::path dst(target_camera_path);
+                    // Try rename (move), overwriting if target exists
+                    try {
+                        fs::rename(src, dst);
+                    } catch (const fs::filesystem_error &e) {
+                        // Fallback to copy + remove if rename fails
+                        fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                        fs::remove(src);
+                    }
+                    if (g_debug_mode) {
+                        std::cout << "[DEBUG] Renamed camera metadata file to: " << target_camera_path << std::endl;
+                    }
+                }
+            } catch (const std::exception &e) {
+                std::cerr << "Warning: failed to rename camera metadata file: " << e.what() << std::endl;
+            }
         }
     }
 
