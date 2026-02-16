@@ -919,6 +919,8 @@ int main(int argc, char *argv[]) {
             // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
             float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 1.05; // 5 percent buffer
             float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 1.05; // 5 percent buffer
+            //float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 2; // 200 percent buffer
+            //float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 2; // 200 percent buffer
 
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
@@ -1253,10 +1255,12 @@ int main(int argc, char *argv[]) {
             if (g_debug_mode) std::cout << "[DEBUG] Running radiation bands..." << std::endl;
             radiation.runBand(bandlabels);
             
-            // process image using standard pipeline
+            // Apply image corrections (brightness, contrast, saturation)
+            // Note: Auto-exposure is already applied during runBand() based on camera exposure_mode
+            // Use exposure_gain to fine-tune if needed (1.0 = no adjustment)
+            // float exposure_gain = sampled_params["camera"]["sensor"].value("exposure_gain", 1.0f);
             radiation.applyCameraImageCorrections(cameralabel, "red", "green",
-                 "blue", 1.0, 1.0, 1.0);
-            printGPUMemoryUsage("After runBand");
+                "blue", 1.0, 0.9, 1.0);
             
             // save rendered RGB image with custom filename
             std::string image_file = radiation.writeCameraImage(

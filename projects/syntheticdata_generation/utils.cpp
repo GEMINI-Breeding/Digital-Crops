@@ -130,6 +130,11 @@ void addSampledValues(json& j, std::mt19937& rng) {
 
 // Sample all parameters in JSON structure
 json sampleParams(json& j_input, std::mt19937& rng) {
+    // Recursively add "sampled" values to all parameters
+    // But the problem here is some keys need to be sampled, but some are already determined
+    // Final json will only have determined value without min, max, sampling, sampled keys
+    // Another problem is it don't force the types, such as float and uint
+    
     // Create a copy of the json
     json j = j_input;
 
