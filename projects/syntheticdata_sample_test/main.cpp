@@ -379,7 +379,7 @@ int main(int argc, char* argv[]){
         calibration.addCalibriteColorboard(make_vec3(0,0.75,0.001), 0.025);
 
         // set up sun lighting
-        SphericalCoord sun_dir = make_SphericalCoord(deg2rad(s.elevation_degrees), -deg2rad(s.azimuth_degrees));
+        SphericalCoord sun_dir = make_SphericalCoord(deg2rad(s.elevation_degrees), deg2rad(s.azimuth_degrees));
         uint sunID = radiation.addSunSphereRadiationSource(sun_dir);
         radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
 

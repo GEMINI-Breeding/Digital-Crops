@@ -203,8 +203,8 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
     setup.sun_dir = make_SphericalCoord(
         deg2rad(sampled_params["environment"]["sun"]["elevation_degrees"]
                     .get<float>()),
-        -deg2rad(sampled_params["environment"]["sun"]["azimuth_degrees"]
-                     .get<float>()));
+        deg2rad(sampled_params["environment"]["sun"]["azimuth_degrees"]
+                    .get<float>()));
     
     return setup;
 }
