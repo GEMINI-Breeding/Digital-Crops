@@ -50,7 +50,7 @@ from pyproj import Transformer
 # Paths configuration
 ortho_path = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/real_data/2025-06-06/Drone/2025-06-06-RGB.tif"
 geojson_path = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/Plot-Boundary-WGS84.geojson"
-helios_output_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/HELIOS_20260215/"
+helios_output_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/HELIOS_20260327/"
 
 # DAP to visualize
 dap = 10
@@ -153,7 +153,7 @@ if focus_plot:
     example_plot = gdf[(gdf['column'] == example_col) & (gdf['row'] == example_row)]
     if len(example_plot) > 0:
         _ep_utm = gdf_utm[(gdf_utm['column'] == example_col) & (gdf_utm['row'] == example_row)]
-    _ep_utm.boundary.plot(ax=ax, color='red', linewidth=3, label=f'Plot Column {example_col}, Row {example_row}')
+        _ep_utm.boundary.plot(ax=ax, color='red', linewidth=3, label=f'Plot Column {example_col}, Row {example_row}')
         ax.legend(fontsize=14)
     title_suffix = f", Highlighted: Column {example_col}, Row {example_row}"
 else:
@@ -1086,8 +1086,8 @@ from datetime import datetime
 # Configuration for the figure
 daps_to_visualize = [10, 30, 50, 70, 90]
 planting_date = datetime.strptime("2025-05-27", "%Y-%m-%d")
-ortho_data_dir = "/home/lion397/farm_codes/Image2PlantArchitecture_v2/data/raw/2025_Davis/real_data/daps"
-helios_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/HELIOS_20260215/"
+ortho_data_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/real_data/daps"
+helios_dir = helios_output_dir
 geojson_path = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/Plot-Boundary-WGS84.geojson"
 
 # Load plot boundaries (WGS84)
