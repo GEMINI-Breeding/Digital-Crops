@@ -24,6 +24,36 @@ json loadParametersFromJson(const std::string& filename);
 void addSampledValues(json& j, std::mt19937& rng);
 json sampleParams(json &j_input, std::mt19937 &rng);
 
+// Helper function to get a number from JSON with a default value
+template <typename T>
+inline T getJsonNumberOr(const json& root,
+                         std::initializer_list<const char*> keys,
+                         T default_value) {
+    const json* current = &root;
+    for (const char* key : keys) {
+        std::cout << "[DEBUG] getJsonNumberOr checking key: " << key << std::endl;
+        if (!current->is_object() || !current->contains(key)) {
+            return default_value;
+        }
+        current = &(current->at(key));
+    }
+
+    if (current->is_null() || !current->is_number()) {
+        return default_value;
+    }
+    return current->get<T>();
+}
+
+// Helper function to get a boolean from JSON with a default value
+bool getJsonBoolOr(const json& root,
+                  std::initializer_list<const char*> keys,
+                  bool default_value);
+
+// Helper function to get a string from JSON with a default value
+std::string getJsonStringOr(const json& root,
+                           std::initializer_list<const char*> keys,
+                           const std::string& default_value);
+
 // Field-of-view helper functions
 // HFOV_deg: horizontal FOV in degrees
 // aspect_ratio: width / height

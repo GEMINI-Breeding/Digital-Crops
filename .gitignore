@@ -61,3 +61,7 @@ Makefile
 *.cmake
 !CMakeLists.txt
 !*.cmake.in
+projects/syntheticdata_generation/debug_sweep_output/
+*.gif
+*.png
+*.jpeg

@@ -16,7 +16,10 @@
 #include "SyntheticAnnotation.h"
 #include "Visualizer.h"
 #include "json.hpp"
-// #include "EnergyBalanceModel.h"
+#include "EnergyBalanceModel.h"
+#include "BoundaryLayerConductanceModel.h"
+#include "StomatalConductanceModel.h"
+#include "PhotosynthesisModel.h"
 
 #include "field.h"
 #include "main.h"
@@ -43,21 +46,43 @@ struct CameraSetup {
     SphericalCoord sun_dir;
 };
 
+template <typename T>
+T getJsonNumberOr(const json& root,
+                 std::initializer_list<const char*> keys,
+                 T default_value);
+
+bool getJsonBoolOr(const json& root,
+                  std::initializer_list<const char*> keys,
+                  bool default_value);
+
+std::string getJsonStringOr(const json& root,
+                           std::initializer_list<const char*> keys,
+                           const std::string& default_value);
+
 void init_plant_architecture(PlantArchitecture& plantarchitecture,
                              json sampled_params) {
 
     // Load plant from Helios Library
-    plantarchitecture.loadPlantModelFromLibrary(sampled_params["metadata"]["plant_type"]);
+    plantarchitecture.loadPlantModelFromLibrary(getJsonStringOr(sampled_params, {"metadata", "plant_type"}, "cowpea"));
+
     plantarchitecture.disableMessages();
     // Get the shoot parameters
     std::map<std::string, ShootParameters> shoot_params =
         plantarchitecture.getCurrentShootParameters();
 
     // update leaf pitch and peduncle length
-    shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch    \
-     = sampled_params["plant_properties"]["architecture"]["phytomer_parameters"]["leaf_pitch"];
-    shoot_params.at("trifoliate").flower_bud_break_probability      \
-     = sampled_params["plant_properties"]["architecture"]["flower_bud_break_probability"];
+    const float leaf_pitch = getJsonNumberOr<float>(
+        sampled_params,
+        {"plant_properties", "architecture", "phytomer_parameters", "leaf_pitch"},
+        0.0f);
+    const float flower_bud_break_probability = getJsonNumberOr<float>(
+        sampled_params,
+        {"plant_properties", "architecture", "flower_bud_break_probability"},
+        0.4f);
+
+    shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch = leaf_pitch;
+    shoot_params.at("trifoliate").flower_bud_break_probability =
+        flower_bud_break_probability;
 
 
     // update leaf (comment out  below to render faster)
@@ -77,34 +102,68 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
 }
 
-CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, json sampled_params) {
+CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, json& sampled_params) {
     CameraSetup setup;
     
     // camera params
     json cam_prop_json = sampled_params["camera"];
     
     // focus on center of scene
+    const float camera_height_default = 5.0f;
+    const float focal_plane_distance_difference_default = 0.5f;
+    const float camera_height = getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "camera_height"}, camera_height_default);
+    const float focal_plane_distance_difference = getJsonNumberOr<float>(
+        cam_prop_json,
+        {"sensor", "focal_plane_distance_difference"},
+        focal_plane_distance_difference_default);
     setup.cam_prop.focal_plane_distance =
-        cam_prop_json["positioning"]["camera_height"].get<float>() -
-        cam_prop_json["sensor"]["focal_plane_distance_difference"].get<float>(); 
+        camera_height - focal_plane_distance_difference;
 
     // make it small so it will be in focus
     setup.cam_prop.lens_diameter =
-        cam_prop_json["sensor"]["lens_diameter"].get<float>(); 
+        getJsonNumberOr<float>(cam_prop_json, {"sensor", "lens_diameter"}, 0.0028f);
+    // Clamp lens_diameter to prevent ISO mode from producing f_number = infinity → zero exposure.
+    // HELIOS ISO exposure uses: gain = ISO * shutter / f_number², where f_number = focal_length / lens_diameter.
+    // A pinhole (lens_diameter=0) makes f_number infinite → gain=0 → pitch-black image.
+    if (setup.cam_prop.lens_diameter < 1e-4f) {
+        setup.cam_prop.lens_diameter = 0.0028f; // default ~f/46 aperture
+    }
 
-    float ground_x = sampled_params["field"]["layout"]["plot_size_x"];
-    float camera_height = cam_prop_json["positioning"]["camera_height"].get<float>();
-    // Changes FOV to cover entire field
+    float single_plot_x = getJsonNumberOr<float>(
+        sampled_params, {"field", "layout", "plot_size_x"}, 1.299f);
+    float single_plot_y = getJsonNumberOr<float>(
+        sampled_params, {"field", "layout", "plot_size_y"}, 3.831f);
+    int num_beds = getJsonNumberOr<int>(sampled_params, {"field", "num_beds"}, 1);
+    int num_rows = getJsonNumberOr<int>(sampled_params, {"field", "num_rows"}, 1);
+    
+    float ground_x = single_plot_x * num_beds;
+    
+    // Changes HFOV to exactly cover horizontal field width without margin.
+    // Vertical coverage is handled natively by matching image resolution aspect ratio.
     setup.cam_prop.HFOV = calculateFOV(ground_x, camera_height);
     setup.cam_prop.camera_resolution = make_int2(
-        cam_prop_json["sensor"]["resolution_x"].get<int>(),
-        cam_prop_json["sensor"]["resolution_y"].get<int>());
+        getJsonNumberOr<int>(cam_prop_json, {"sensor", "resolution_x"}, 720),
+        getJsonNumberOr<int>(cam_prop_json, {"sensor", "resolution_y"}, 720));
     
     // Read exposure settings from JSON
     // Exposure mode: "auto" (automatic exposure), "ISO" (ISO-based), or "manual" (no automatic exposure scaling)
-    std::string exposure_mode = cam_prop_json["sensor"].value("exposure_mode", "auto");
-    int iso_value = cam_prop_json["sensor"].value("ISO", 100);
-    std::string shutter_speed_str = cam_prop_json["sensor"].value("shutter_speed", "1/125");
+    std::string exposure_mode = getJsonStringOr(
+        cam_prop_json, {"sensor", "exposure_mode"}, "ISO");
+    int iso_value = getJsonNumberOr<int>(cam_prop_json, {"sensor", "ISO"}, 100);
+    std::string shutter_speed_str = getJsonStringOr(
+        cam_prop_json, {"sensor", "shutter_speed"}, "1/125");
+        
+    // Calculate Dynamic ISO if mode is "ISO" (dynamically scaled by sun elevation to fix dark dirt)
+    if (exposure_mode == "ISO") {
+        float sun_elevation_rad = deg2rad(getJsonNumberOr<float>(
+            sampled_params, {"environment", "sun", "elevation_degrees"}, 45.0f));
+        float sin_el = std::max(0.1f, std::sin(sun_elevation_rad));
+        iso_value = static_cast<int>(100.0f / sin_el); // Base ISO 100 for noon, scales up as sun sets
+        
+        // Write the updated ISO value back to JSON so it gets saved
+        sampled_params["camera"]["sensor"]["ISO"] = iso_value;
+    }
     
     if (exposure_mode == "auto") {
         setup.cam_prop.exposure = "auto";
@@ -125,26 +184,21 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
         setup.cam_prop.exposure = "manual";
     }
 
-    // Calculate plant canopy center based on plant base positions or default to origin
-    vec3 canopy_center = make_vec3(0, 0, 0);
+    // Calculate exact geometric midpoint of all plot origins as the default canopy center
+    // Each plot origin is (bed-1)*plot_size_x and (row-1)*plot_size_y.
+    // The exact midpoint across the grid is thus (num_beds-1)*plot_size_x*0.5f and (num_rows-1)*plot_size_y*0.5f.
+    single_plot_y = getJsonNumberOr<float>(
+        sampled_params, {"field", "layout", "plot_size_y"}, 3.831f);
+    num_rows = getJsonNumberOr<int>(sampled_params, {"field", "num_rows"}, 1);
+    vec3 canopy_center = make_vec3(single_plot_x * (num_beds - 1) * 0.5f, single_plot_y * (num_rows - 1) * 0.5f, 0.0f);
     
     // Check if focusing_plants key exists and is not null
-    bool focusing_plants = false;
-    try {
-        if (cam_prop_json.contains("positioning") && 
-            cam_prop_json["positioning"].contains("focusing_plants") &&
-            !cam_prop_json["positioning"]["focusing_plants"].is_null()) {
-            focusing_plants = cam_prop_json["positioning"]["focusing_plants"].get<bool>();
-            std::cout << "[DEBUG] focusing_plants = " << focusing_plants << std::endl;
-        } else {
-            std::cout << "[DEBUG] focusing_plants key not found or null, using default: false" << std::endl;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[ERROR] Failed to read camera.positioning.focusing_plants: " << e.what() << std::endl;
-        std::cerr << "[ERROR] Using default value: false" << std::endl;
-    }
+    bool focusing_plants = getJsonBoolOr(
+        cam_prop_json, {"positioning", "focusing_plants"}, false);
+    std::cout << "[DEBUG] focusing_plants = " << focusing_plants << std::endl;
     
     if (focusing_plants) {
+        std::cout << "[DEBUG] focusing_plants is true, calculating bounding box..." << std::endl;
         // Get bounding box from plant base positions for more accurate centering
         vec3 min_corner = make_vec3(std::numeric_limits<float>::max(), 
                                     std::numeric_limits<float>::max(), 
@@ -172,40 +226,43 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
         canopy_center = (min_corner + max_corner) * 0.5f;
     }
 
-    // Convert azimuth angle from degrees to radians
-    float azimuth_rad =
-        deg2rad(cam_prop_json["positioning"]
-                              ["azimuth_angle"]
-                                  .get<float>());
-                                // Assuming looking the x axis direction
-                                // towards zero when azimuth_angle=0
-
-    // Calculate camera position based on plant canopy center
-    float dist = cam_prop_json["positioning"]
-                                      ["distance_from_center"]
-                                          .get<float>();
+    std::cout << "[DEBUG] Calculating azimuth..." << std::endl;
+    std::cout << "[DEBUG] Getting azimuth from JSON..." << std::endl;
+    float azimuth_deg = getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "azimuth_angle"}, 0.0f);
+    std::cout << "[DEBUG] azimuth_deg = " << azimuth_deg << std::endl;
     
-    // Camear rotation starts at -pi / 2 to see y axis up when rad = 0
-    // cos(theta - pi/2) = sin(theta), sin(theta - pi/2) = -cos(theta)
-    setup.camera_position.x = canopy_center.x + dist*sin(azimuth_rad); 
-    setup.camera_position.y = canopy_center.y - dist*cos(azimuth_rad);
-    setup.camera_position.z =
-        cam_prop_json["positioning"]["camera_height"]
-            .get<float>();
+    std::cout << "[DEBUG] Converting to radians..." << std::endl;
+    float azimuth_rad = deg2rad(azimuth_deg);
+    std::cout << "[DEBUG] azimuth_rad = " << azimuth_rad << std::endl;
 
+    std::cout << "[DEBUG] Calculating camera distance..." << std::endl;
+    float dist = getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "distance_from_center"}, 0.01f);
+    std::cout << "[DEBUG] dist = " << dist << std::endl;
+
+    std::cout << "[DEBUG] Setting camera_position.x..." << std::endl;
+    setup.camera_position.x = canopy_center.x + dist*sin(azimuth_rad); 
+    std::cout << "[DEBUG] Setting camera_position.y..." << std::endl;
+    setup.camera_position.y = canopy_center.y - dist*cos(azimuth_rad);
+    std::cout << "[DEBUG] Setting camera_position.z..." << std::endl;
+    setup.camera_position.z = camera_height;
+
+    std::cout << "[DEBUG] Setting camera_lookat..." << std::endl;
     // Calculate camera lookat point (slightly offset from canopy center)
-    setup.camera_lookat.x = canopy_center.x + cam_prop_json["positioning"]
-                        ["lookat_offset_x"].get<float>();
-    setup.camera_lookat.y = canopy_center.y + cam_prop_json["positioning"]
-                        ["lookat_offset_y"].get<float>();
-    setup.camera_lookat.z = canopy_center.z + cam_prop_json["positioning"] ["lookat_offset_z"].get<float>();
+    setup.camera_lookat.x = canopy_center.x + getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "lookat_offset_x"}, 0.0f);
+    setup.camera_lookat.y = canopy_center.y + getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "lookat_offset_y"}, 0.0f);
+    setup.camera_lookat.z = canopy_center.z + getJsonNumberOr<float>(
+        cam_prop_json, {"positioning", "lookat_offset_z"}, 0.0f);
 
     setup.sun_dir = make_SphericalCoord(
-        deg2rad(sampled_params["environment"]["sun"]["elevation_degrees"]
-                    .get<float>()),
-        deg2rad(sampled_params["environment"]["sun"]["azimuth_degrees"]
-                    .get<float>()));
-    
+        deg2rad(getJsonNumberOr<float>(
+            sampled_params, {"environment", "sun", "elevation_degrees"}, 45.0f)),
+        deg2rad(getJsonNumberOr<float>(
+            sampled_params, {"environment", "sun", "azimuth_degrees"}, 180.0f)));
+    std::cout << "[DEBUG] init_camera complete. Returning setup." << std::endl;
     return setup;
 }
 
@@ -303,27 +360,35 @@ void update_leafoptics(Context &context,
 
 
 void init_spectral_data(Context &context,
-                          std::string cameralabel,
+                          const std::string& cameralabel,
                           RadiationModel &radiation,
                           PlantArchitecture &plantarchitecture,
                           LeafOptics& leafoptics,
                           const CameraSetup& camera_setup,
-                          json sampled_params) {
+                          const json& sampled_params,
+                          bool run_multispectral,
+                          bool run_temperature,
+                          bool run_wue) {
     /*
     Inits spectral data. There are three ways to initialize the spectrum data
     1. Load from XML
     2. Blend from radiation model
     3. Using leaf optics model
     */
+    std::cout << "[DEBUG] init_spectral_data started..." << std::endl;
 
     // Note: spectral data configuration is now under environment.soil
+    std::cout << "[DEBUG] Accessing soil_cfg..." << std::endl;
     auto soil_cfg = sampled_params["environment"]["soil"];
+    std::cout << "[DEBUG] soil_cfg accessed." << std::endl;
     auto radiation_cfg = json::object(); // Placeholder for backward compatibility
     
     // Part 1: load color and reflectivity data from XML
     std::string colorboard_file = radiation_cfg.value(
         "colorboard", "plugins/radiation/spectral_data/color_board/DGK_DKK_colorboard.xml");
+    std::cout << "[DEBUG] Loading colorboard XML..." << std::endl;
     context.loadXML(colorboard_file.c_str(), true);
+    std::cout << "[DEBUG] colorboard XML loaded." << std::endl;
 
 #if 0
     // Load leaf surface spectral data with default value
@@ -345,29 +410,41 @@ void init_spectral_data(Context &context,
     } else {
         soil_spectral_file = "plugins/radiation/spectral_data/soil_surface_spectral_library.xml";
     }
+    std::cout << "[DEBUG] Loading soil spectral XML..." << std::endl;
     context.loadXML(soil_spectral_file.c_str(), true);
+    std::cout << "[DEBUG] soil spectral XML loaded." << std::endl;
     
+    std::cout << "[DEBUG] Renaming global data..." << std::endl;
     context.renameGlobalData("ColorReference_DGK_08", "spectrum_yellow");
     context.renameGlobalData("ColorReference_DGK_09", "spectrum_green");
     context.renameGlobalData("ColorReference_DGK_16", "spectrum_purple");
     context.renameGlobalData("ColorReference_DGK_01", "spectrum_white");
 
+    std::cout << "[DEBUG] Blending spectra..." << std::endl;
     // Part 2: blending spectrum  by using radiation model
-    // custom flower colors
+    std::cout << "[DEBUG] Blending reflectivity_flower_cowpea_closed..." << std::endl;
     radiation.blendSpectra("reflectivity_flower_cowpea_closed",
                            {"spectrum_yellow", "spectrum_green"}, {0.35, 0.65});
+    std::cout << "[DEBUG] Blending reflectivity_flower_cowpea_open..." << std::endl;
     radiation.blendSpectra("reflectivity_flower_cowpea_open",
                            {"spectrum_purple", "spectrum_white"},
                            {0.10, 0.90}); // mostly white with purple tint
 
+    std::cout << "[DEBUG] Blending reflectivity_pod_cowpea..." << std::endl;
     // custom pod colors
     radiation.blendSpectra("reflectivity_pod_cowpea",
                            {"spectrum_yellow", "spectrum_green"}, {0.95, 0.05});
 
     // set up sun lighting
+    std::cout << "[DEBUG] Adding sun sphere radiation source..." << std::endl;
+    std::cout << "[DEBUG] sun_dir: elevation=" << camera_setup.sun_dir.elevation << ", azimuth=" << camera_setup.sun_dir.azimuth << std::endl;
     uint sunID = radiation.addSunSphereRadiationSource(camera_setup.sun_dir);
+    std::cout << "[DEBUG] sunID = " << sunID << std::endl;
+    std::cout << "[DEBUG] Setting source spectrum..." << std::endl;
     radiation.setSourceSpectrum(sunID, "solar_spectrum_direct_ASTMG173");
+    std::cout << "[DEBUG] Source spectrum set." << std::endl;
 
+    std::cout << "[DEBUG] Adding radiation bands..." << std::endl;
     // create RGB radiation bands
     radiation.addRadiationBand("red");
     radiation.disableEmission("red");
@@ -376,24 +453,49 @@ void init_spectral_data(Context &context,
 
     radiation.copyRadiationBand("red", "green");
     radiation.copyRadiationBand("red", "blue");
+    if (run_multispectral) {
+        radiation.copyRadiationBand("red", "NIR");
+    }
+    if (run_temperature) {
+        radiation.copyRadiationBand("red", "LW");
+    }
+    if (run_wue) {
+        radiation.addRadiationBand("wue_band");
+    }
 
     std::vector<std::string> bandlabels = {"red", "green", "blue"};
+    if (run_multispectral) {
+        bandlabels.push_back("NIR");
+    }
+    if (run_temperature) {
+        bandlabels.push_back("LW");
+    }
+    if (run_wue) {
+        bandlabels.push_back("wue_band");
+    }
     radiation.setDiffuseSpectrum("solar_spectrum_diffuse_ASTMG173");
    
+    std::cout << "[DEBUG] Adding radiation camera: " << cameralabel << std::endl;
     // add the camera to the radiation model
-    radiation.addRadiationCamera(cameralabel, bandlabels, camera_setup.camera_position,
+    radiation.addRadiationCamera(cameralabel.c_str(), bandlabels, camera_setup.camera_position,
                                  camera_setup.camera_lookat, camera_setup.cam_prop, 100);
+    std::cout << "[DEBUG] Radiation camera added." << std::endl;
 
+    std::cout << "[DEBUG] Loading camera spectral library..." << std::endl;
     // set camera spectral response to simulate iPhone camera
     auto camera_cfg = sampled_params["camera"]["sensor"];
     std::string camera_spectral_library = "plugins/radiation/spectral_data/camera_spectral_library.xml";
     context.loadXML(camera_spectral_library.c_str(), true);
-    std::string camera_model = camera_cfg["model"].get<std::string>();
-    radiation.setCameraSpectralResponse(cameralabel, "red",
+    
+    std::string camera_model = getJsonStringOr(camera_cfg, {"model"}, "Basler_acA2500-20gc");
+    std::cout << "[DEBUG] camera_model = " << camera_model << std::endl;
+
+    std::cout << "[DEBUG] Setting camera spectral responses..." << std::endl;
+    radiation.setCameraSpectralResponse(cameralabel.c_str(), "red",
                                         (camera_model + "_red").c_str());
-    radiation.setCameraSpectralResponse(cameralabel, "green",
+    radiation.setCameraSpectralResponse(cameralabel.c_str(), "green",
                                         (camera_model + "_green").c_str());
-    radiation.setCameraSpectralResponse(cameralabel, "blue",
+    radiation.setCameraSpectralResponse(cameralabel.c_str(), "blue",
                                         (camera_model + "_blue").c_str());
 
 
@@ -444,6 +546,10 @@ struct CommandLineOptions {
     bool vis = false; // Skip visualizer image by default
     bool calibrate_color = false; // Add color calibration panel and run auto-calibration
     bool dry_run = false; // Load and validate JSON without running generation
+    bool run_multispectral = false; // Generate multispectral (NIR) image
+    bool run_temperature = false; // Generate temperature (LW) image
+    bool run_depth = false; // Generate depth map image
+    bool run_wue = false; // Generate Water-Use Efficiency (WUE) image
     float height = 1.0f;
     int days = 0;
     unsigned int seed = 0;
@@ -470,8 +576,6 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.rotation_view = true;
         } else if (arg == "-g" || arg == "--grow") {
             options.grow = true;
-        } else if (arg == "--xml") {
-            options.save_xml = true;
         } else if (arg == "--stats-only") {
             options.stats_only = true;
         } else if (arg == "--vis") {
@@ -487,7 +591,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  -r, --rotation           Enable rotation view\n"
                       << "  -g, --grow               Enable grow mode\n"
                       << "  -d, --debug              Enable debug mode\n"
-                      << "  --xml                    Save XML output\n"
+                      << "  --xml true|false         Save XML output (default: true)\n"
                       << "  --stats-only             Only output statistics\n"
                       << "  --gui                    Enable GUI interactive mode\n"
                       << "  --radiation true|false   Run radiation model (default: true)\n"
@@ -516,6 +620,15 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 } else {
                     std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
                 }
+            } else if (arg == "--xml") {
+                std::string xml_flag = argv[++i];
+                if (xml_flag == "false" || xml_flag == "0") {
+                    options.save_xml = false;
+                } else if (xml_flag == "true" || xml_flag == "1") {
+                    options.save_xml = true;
+                } else {
+                    std::printf("Invalid value for --xml: %s (use true/false or 1/0)\n", xml_flag.c_str());
+                }
             } else if (arg == "--calibrate-color") {
                 std::string cal_flag = argv[++i];
                 if (cal_flag == "false" || cal_flag == "0") {
@@ -525,6 +638,22 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 } else {
                     std::printf("Invalid value for --calibrate-color: %s (use true/false or 1/0)\n", cal_flag.c_str());
                 }
+            } else if (arg == "--multispectral") {
+                std::string ms_flag = argv[++i];
+                if (ms_flag == "false" || ms_flag == "0") options.run_multispectral = false;
+                else if (ms_flag == "true" || ms_flag == "1") options.run_multispectral = true;
+            } else if (arg == "--temperature" || arg == "--thermal") {
+                std::string temp_flag = argv[++i];
+                if (temp_flag == "false" || temp_flag == "0") options.run_temperature = false;
+                else if (temp_flag == "true" || temp_flag == "1") options.run_temperature = true;
+            } else if (arg == "--depth") {
+                std::string depth_flag = argv[++i];
+                if (depth_flag == "false" || depth_flag == "0") options.run_depth = false;
+                else if (depth_flag == "true" || depth_flag == "1") options.run_depth = true;
+            } else if (arg == "--wue" || arg == "--run_wue") {
+                std::string wue_flag = argv[++i];
+                if (wue_flag == "false" || wue_flag == "0") options.run_wue = false;
+                else if (wue_flag == "true" || wue_flag == "1") options.run_wue = true;
             } else if (arg == "-h" || arg == "--height") {
                 options.height = std::stof(argv[++i]);
             } else if (arg == "-t" || arg == "--tile") {
@@ -864,14 +993,6 @@ int main(int argc, char *argv[]) {
         mode = parseGenerationMode(field["layout"]["mode"].get<std::string>());
     }
 
-    // Declare context
-    Context context;
-    context.seedRandomGenerator(final_seed);
-    // Delcare LeafOptics, RadiationModel, and PlantArchitecture
-    LeafOptics leafoptics(&context);
-    leafoptics.disableMessages();
-    RadiationModel radiation(&context);
-    PlantArchitecture plantarchitecture(&context);
 
     for (int i = 0; i < num_iterations; ++i) {
         json sampled_params;
@@ -879,6 +1000,16 @@ int main(int argc, char *argv[]) {
 
         // Save the seed value to sampled_params
         sampled_params["seed"] = final_seed;
+        
+        std::cout << "[DEBUG] Creating fresh context and models for iteration " << i << "..." << std::endl;
+        Context context;
+        context.seedRandomGenerator(final_seed);
+        
+        LeafOptics leafoptics(&context);
+        leafoptics.disableMessages();
+        RadiationModel radiation(&context);
+        PlantArchitecture plantarchitecture(&context);
+        std::cout << "[DEBUG] Context and models initialized." << std::endl;
         
         // filename with zero-padded iteration number
         std::stringstream filename_stream;
@@ -888,7 +1019,7 @@ int main(int argc, char *argv[]) {
 
         // Set camera
         //std::string cameralabel = "camera";
-        std::string cameralabel = filename;
+        std::string cameralabel = "camera";
         CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
@@ -898,27 +1029,108 @@ int main(int argc, char *argv[]) {
         if (args.run_radiation) {
             // Initialize the radiation model
             init_spectral_data(context, cameralabel, radiation, plantarchitecture,
-                                leafoptics, camera_setup, sampled_params);
+                                leafoptics, camera_setup, sampled_params,
+                                args.run_multispectral, args.run_temperature, args.run_wue);
         }
 
-        // create ground - either OBJ-based or tile-based
+        // Set up ground
         std::vector<uint> UUIDs_ground;
         
-        // Check if use_obj_ground key exists and is not null
-        bool use_obj_ground = sampled_params["environment"]["soil"]["use_obj_ground"];
+        std::cout << "[DEBUG] sampled_params before use_obj_ground check: " << sampled_params.dump() << std::endl;
+
+        bool use_obj_ground = getJsonBoolOr(
+            sampled_params, {"environment", "soil", "use_obj_ground"}, true);
         if (use_obj_ground) {
+            // Compatibility shim for make_field in field.cpp
+            // field.cpp expects num_beds, num_rows in field/ and plot_shape in field/
+            if (sampled_params.contains("field")) {
+                auto& field = sampled_params["field"];
+                if (field.contains("layout")) {
+                    json layout = field["layout"]; // Use copy to avoid dangling ref when field is mutated
+                    if (!field.contains("num_beds") && layout.contains("num_beds")) {
+                        field["num_beds"] = layout["num_beds"];
+                    }
+                    if (!field.contains("num_rows") && layout.contains("num_rows")) {
+                        field["num_rows"] = layout["num_rows"];
+                    }
+                    if (!field.contains("plot_shape")) {
+                        field["plot_shape"] = layout;
+                    }
+                    // Also ensure obj_file_path is available where make_field expects it
+                    std::cout << "[DEBUG] Checking for plot_shape and obj_file_path..." << std::endl;
+                    if (field.is_object() && field.contains("plot_shape") && field["plot_shape"].is_object()) {
+                        if (!field["plot_shape"].contains("obj_file_path")) {
+                            if (sampled_params.contains("environment") && 
+                                sampled_params["environment"].contains("soil") &&
+                                sampled_params["environment"]["soil"].contains("obj_file_path")) {
+                                std::cout << "[DEBUG] Copying obj_file_path to plot_shape..." << std::endl;
+                                field["plot_shape"]["obj_file_path"] = sampled_params["environment"]["soil"]["obj_file_path"];
+                            }
+                        }
+                    }
+                }
+            }
+            std::cout << "[DEBUG] Calling make_field with sampled_params..." << std::endl;
             UUIDs_ground = make_field(context, sampled_params);
+            std::cout << "[DEBUG] make_field returned " << UUIDs_ground.size() << " primitives." << std::endl;
+            
+            // Calculate bounding box of the generated 3D ground to find the true minimum elevation (z)
+            helios::vec3 min_c, max_c, ext;
+            getBoundingBoxAndExtent(context, UUIDs_ground, min_c, max_c, ext);
+            float pad_z = min_c.z + 0.01f; // Position padding tile exactly 1cm below the lowest point of the terrain
+            
+            // Add a large background padding tile slightly beneath the 3D OBJ ground
+            // to perfectly cover any camera FOV margins and prevent black border artifacts.
+            float single_plot_x = getJsonNumberOr<float>(sampled_params, {"field", "layout", "plot_size_x"}, 1.299f);
+            float single_plot_y = getJsonNumberOr<float>(sampled_params, {"field", "layout", "plot_size_y"}, 3.831f);
+            int num_beds = getJsonNumberOr<int>(sampled_params, {"field", "num_beds"}, 1);
+            int num_rows = getJsonNumberOr<int>(sampled_params, {"field", "num_rows"}, 1);
+            
+            float pad_ground_x = single_plot_x * num_beds * 1.50f;
+            float pad_ground_y = single_plot_y * num_rows * 1.50f;
+            helios::vec3 pad_center = make_vec3(single_plot_x * (num_beds - 1) * 0.5f, single_plot_y * (num_rows - 1) * 0.5f, pad_z);
+            helios::vec2 pad_field_size = make_vec2(pad_ground_x, pad_ground_y);
+            helios::vec2 pad_tile_size = make_vec2(0.1f, 0.1f);
+            
+            // Mirror native Nyquist subsampling logic based on camera resolution to avoid sampling artifacts
+            auto cam_config = sampled_params["camera"];
+            int camera_res_x = getJsonNumberOr<int>(cam_config, {"sensor", "resolution_x"}, 720);
+            int camera_res_y = getJsonNumberOr<int>(cam_config, {"sensor", "resolution_y"}, 720);
+            float pixel_plot_size_x = pad_ground_x / camera_res_x;
+            float pixel_plot_size_y = pad_ground_y / camera_res_y;
+            float pixel_size = std::max(pixel_plot_size_x, pixel_plot_size_y);
+            float desired_patch_size = pixel_size * 0.5f;
+            
+            int subdiv_x = std::max(100, (int)(pad_ground_x / desired_patch_size));
+            int subdiv_y = std::max(100, (int)(pad_ground_y / desired_patch_size));
+            const int MAX_SUBDIV_PER_AXIS = 1024;
+            int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
+            int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
+            
+            int2 pad_repeat = make_int2(round(pad_ground_x / pad_tile_size.x), round(pad_ground_y / pad_tile_size.y));
+            
+            std::vector<uint> UUIDs_pad = context.addTile(
+                pad_center, pad_field_size, make_SphericalCoord(0, 0), make_int2(clamped_subdiv_x, clamped_subdiv_y),
+                "plugins/visualizer/textures/dirt.jpg", pad_repeat);
+                
+            UUIDs_ground.insert(UUIDs_ground.end(), UUIDs_pad.begin(), UUIDs_pad.end());
+            std::cout << "[DEBUG] Background padding tile added at z=" << pad_z << " with " << clamped_subdiv_x << "x" << clamped_subdiv_y << " subdivisions." << std::endl;
         } else {
             // Calculate pixel size on ground based on camera FOV and resolution from params
             auto cam_config = sampled_params["camera"];
-            float camera_height = cam_config["positioning"]["camera_height"].get<float>();
-            int camera_res_x = cam_config["sensor"]["resolution_x"].get<int>();
-            int camera_res_y = cam_config["sensor"]["resolution_y"].get<int>();
+            float camera_height = getJsonNumberOr<float>(
+                cam_config, {"positioning", "camera_height"}, 5.0f);
+            int camera_res_x = getJsonNumberOr<int>(
+                cam_config, {"sensor", "resolution_x"}, 720);
+            int camera_res_y = getJsonNumberOr<int>(
+                cam_config, {"sensor", "resolution_y"}, 720);
             
             // load dirt texture with fixed size (original method)
             // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
-            float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 1.05; // 5 percent buffer
-            float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 1.05; // 5 percent buffer
+            float ground_x = getJsonNumberOr<float>(
+                sampled_params, {"field", "layout", "plot_size_x"}, 1.299f) * 1.05f; // 5 percent buffer
+            float ground_y = getJsonNumberOr<float>(
+                sampled_params, {"field", "layout", "plot_size_y"}, 3.831f) * 1.05f; // 5 percent buffer
             //float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 2; // 200 percent buffer
             //float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 2; // 200 percent buffer
 
@@ -964,14 +1176,19 @@ int main(int argc, char *argv[]) {
         // Set default color for soil
         context.setPrimitiveData(
             UUIDs_ground, "reflectivity_spectrum",
-            sampled_params["environment"]["soil"]["spectral_data"]
-                        ["reflectivity"]
-                            .get<std::string>());
+            getJsonStringOr(
+                sampled_params,
+                {"environment", "soil", "spectral_data", "reflectivity"},
+                "soil_reflectivity_0003"));
         // Make the ground plane single-sided (only visible from above)
         context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
         // Set ground specular exponent from JSON
         float ground_specular = sampled_params["environment"]["soil"].value("specular_exponent", 5.0f);
         context.setPrimitiveData(UUIDs_ground, "specular_exponent", ground_specular);
+        
+        // Add explicit Longwave (LW) band radiative properties for soil ground
+        context.setPrimitiveData(UUIDs_ground, "reflectivity_LW", 0.05f);
+        context.setPrimitiveData(UUIDs_ground, "emissivity_LW", 0.95f);
 
         // Create multiple plots in a grid pattern
         std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
@@ -1066,10 +1283,10 @@ int main(int argc, char *argv[]) {
                 sampled_params["field"]["layout"].erase("sampling");
             }
             auto& plot_shape = sampled_params["field"]["layout"];
-            plot_size_x = plot_shape["plot_size_x"].get<float>();
-            plot_size_y = plot_shape["plot_size_y"].get<float>();
-            int num_beds = plot_shape["num_beds"];
-            int num_rows = plot_shape["num_rows"];
+            plot_size_x = getJsonNumberOr<float>(plot_shape, {"plot_size_x"}, 1.299f);
+            plot_size_y = getJsonNumberOr<float>(plot_shape, {"plot_size_y"}, 3.831f);
+            int num_beds = getJsonNumberOr<int>(plot_shape, {"num_beds"}, 1);
+            int num_rows = getJsonNumberOr<int>(plot_shape, {"num_rows"}, 1);
 
             // params.json only have single plant type within plot for now
             // Get crop type and convert to lowercase for plant library
@@ -1077,8 +1294,9 @@ int main(int argc, char *argv[]) {
             auto plots = sampled_params["field"]["plots"];
             int num_plots = plots.size();
             for (int plot_i=0; plot_i < num_plots; plot_i++) {
-                int bed = plots[plot_i]["bed"];
-                int row = plots[plot_i]["row"];
+                int bed = plots[plot_i].value("bed", 1);
+                int row = plots[plot_i].value("row", 1);
+
                 auto plants = plots[plot_i]["plants"];
                 int num_plants = plants.size();
                 for (int plant_j = 0; plant_j < num_plants; plant_j++) {
@@ -1088,25 +1306,39 @@ int main(int argc, char *argv[]) {
                     // plant count and age can be changed here
                     vec3 origin(0, 0, 0);
 
-                    float X = selected_crop["x"];
-                    float Y = selected_crop["y"];
-                    origin.x = (bed-1) * plot_size_x;    // plant locations are now absolte, need to be removed?
+                    float X = selected_crop.value("x", 0.0f);
+                    float Y = selected_crop.value("y", 0.0f);
+
+                    origin.x = (bed-1) * plot_size_x;
                     origin.y = (row-1) * plot_size_y; 
-                    // float Z = config["crops"][i]["Z"].as<float>();
-                    //vec3 plant_origin = origin + make_vec3(X, Y, 0);
-                    vec3 plant_origin = make_vec3(X, Y, 0); // Use absolute XY
+                    
+                    // Add bed and row offset to plant origin
+                    vec3 plant_origin = origin + make_vec3(X, Y, 0);
                     
                     // Check if xml path is provided and valid
                     if (selected_crop.contains("xml") && 
                         selected_crop["xml"].is_string() && 
                         !selected_crop["xml"].get<std::string>().empty()) {
-                        // Build plant from XML file (already aged)
-                        // It will not use plant origin. It will use base position from the XML
+                        // Build plant from XML file
                         std::string xml_path = selected_crop["xml"].get<std::string>();
                         std::vector<uint> plot_plant_IDs;
                         plot_plant_IDs = plantarchitecture.readPlantStructureXML(xml_path, 0);
-                        for(int i=0;i < plot_plant_IDs.size();i++) {
-                            std::cout << "Loaded plant from XML (ID:" << plot_plant_IDs[i] << "): " << xml_path << std::endl;
+                        
+                        // Translate XML loaded plant coordinates by the plot offset
+                        for(int i=0; i < plot_plant_IDs.size(); i++) {
+                            uint pid = plot_plant_IDs[i];
+                            vec3 shift = make_vec3(origin.x, origin.y, 0);
+                            
+                            // 1. Update logical plant base position
+                            plantarchitecture.setPlantBasePosition(pid, shift);
+                            
+                            // 2. Force translate all 3D mesh objects associated with this plant
+                            std::vector<uint> single_plant_obj_ids = plantarchitecture.getAllPlantObjectIDs(pid);
+                            for (uint obj_id : single_plant_obj_ids) {
+                                context.translateObject(obj_id, shift);
+                            }
+                            
+                            std::cout << "Loaded plant from XML (ID:" << pid << ") and forcefully translated by (" << origin.x << ", " << origin.y << "): " << xml_path << std::endl;
                         }
                     } else {
                         // Build plant from library (needs aging)
@@ -1130,7 +1362,7 @@ int main(int argc, char *argv[]) {
         if (!plant_IDs_aging.empty()) {
             // plants are planted in a single day -> Age all together
             // Therefore there is no dap in plants element
-            float dap = static_cast<int>(sampled_params["metadata"]["dap"]);
+            float dap = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
             if (dap > 0) {
                 //plantarchitecture.advanceTime(plant_IDs_aging, dap);
                 int days_per_update = 2;
@@ -1201,48 +1433,22 @@ int main(int argc, char *argv[]) {
             context.addPatch(position, size, coord, "../img_1x1.png");
         }
         
-        // Render the visualizer image to file if enabled via CLI flag
-        if (args.vis || args.gui) {
-            printGPUMemoryUsage("Before visualizer init");
-            CameraProperties cam_prop = camera_setup.cam_prop;
-            Visualizer vis(cam_prop.camera_resolution.x, cam_prop.camera_resolution.y);
-            vis.clearGeometry();
-            vis.hideWatermark();
-            //vis.disableMessages();
-            
-            // set up sun lighting
-            vis.setLightDirection(sphere2cart(sun_dir));
-            if (sampled_params["environment"]["sun"].value("shadow", true)) {
-                vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-            } else {
-                vis.setLightingModel(Visualizer::LIGHTING_PHONG);
-            }
-            vis.setCameraPosition(camera_position, camera_lookat);
-            float FOV_aspect_ratio = cam_prop.camera_resolution.x / float(cam_prop.camera_resolution.y);
-            vis.setCameraFieldOfView(
-                HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
-
-            //vis.plotUpdate(true);
-            vis.buildContextGeometry(&context);
-
-            std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
-            vis.printWindow(save_path.c_str());
-
-            if (args.gui) {
-                // plotInteractive for GUI mode
-                vis.plotInteractive();
-            }
-        } else {
-            if (g_debug_mode) {
-                std::cout << "Skipping visualizer image save for: " << filename
-                          << " (save_visualizer=false)" << std::endl;
-            }
+        // Render visualizer image after radiation trace to share context and prevent memory exhaustion
+        if (g_debug_mode && !(args.vis || args.gui)) {
+            std::cout << "Skipping visualizer image save for: " << filename
+                      << " (save_visualizer=false)" << std::endl;
         }
 
 
         // Run radiation model by default true
         if (args.run_radiation) {
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
+            if (args.run_multispectral) {
+                bandlabels.push_back("NIR");
+            }
+            if (args.run_temperature) {
+                bandlabels.push_back("LW");
+            }
             radiation.enableCameraMetadata(cameralabel);
             // Change camera_RGB_00000.json to specific name like plot_20_13_0000_camera.json
             // update geometry and run radiation model
@@ -1260,11 +1466,11 @@ int main(int argc, char *argv[]) {
             // Use exposure_gain to fine-tune if needed (1.0 = no adjustment)
             // float exposure_gain = sampled_params["camera"]["sensor"].value("exposure_gain", 1.0f);
             radiation.applyCameraImageCorrections(cameralabel, "red", "green",
-                "blue", 1.0, 0.9, 1.0);
+                "blue", 1.0, 1.0, 1.0);
             
             // save rendered RGB image with custom filename
             std::string image_file = radiation.writeCameraImage(
-                cameralabel, bandlabels, "RGB", output_dir, 0);
+                cameralabel, {"red", "green", "blue"}, "RGB", output_dir, 0);
 
             // move image_file to output_dir/<filename>.jpeg
             try {
@@ -1283,7 +1489,223 @@ int main(int argc, char *argv[]) {
                     image_file = target_path; // update to moved path
                 }
             } catch (const std::exception &e) {
-                std::cerr << "Warning: failed to move image file: " << e.what() << std::endl;
+                std::cerr << "Warning: failed to move RGB image file: " << e.what() << std::endl;
+            }
+
+            if (args.run_multispectral) {
+                std::string ms_file = radiation.writeCameraImage(
+                    cameralabel, {"green", "red", "NIR"}, "multispectral", output_dir, 0);
+                try {
+                    std::string target_path = output_dir + "/" + filename + "_multispectral.jpeg";
+                    if (ms_file != target_path) {
+                        fs::path src(ms_file);
+                        fs::path dst(target_path);
+                        try {
+                            fs::rename(src, dst);
+                        } catch (const fs::filesystem_error &e) {
+                            fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                            fs::remove(src);
+                        }
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Warning: failed to move multispectral image file: " << e.what() << std::endl;
+                }
+            }
+
+            if (args.run_temperature || args.run_wue) {
+                std::cout << "[DEBUG] Running biophysical simulation (Energy Balance)..." << std::endl;
+                std::vector<uint> UUIDs_leaves;
+                std::vector<uint> all_crop_ids = plantarchitecture.getAllPlantIDs();
+                for (uint id : all_crop_ids) {
+                    std::vector<uint> leaf_obj_ids = plantarchitecture.getPlantLeafObjectIDs(id);
+                    std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(leaf_obj_ids);
+                    UUIDs_leaves.insert(UUIDs_leaves.end(), uuids_leaf.begin(), uuids_leaf.end());
+                }
+                std::vector<uint> all_UUIDs = context.getAllUUIDs();
+
+                EnergyBalanceModel energybalance(&context);
+                energybalance.addRadiationBand("red");
+                energybalance.addRadiationBand("green");
+                energybalance.addRadiationBand("blue");
+                energybalance.addRadiationBand("LW");
+
+                BLConductanceModel boundarylayerconductance(&context);
+                boundarylayerconductance.setBoundaryLayerModel(UUIDs_ground, "Ground");
+                boundarylayerconductance.setBoundaryLayerModel(UUIDs_leaves, "Pohlhausen");
+
+                StomatalConductanceModel stomatalconductance(&context);
+                BMFcoefficients bmfc;
+                stomatalconductance.setModelCoefficients(bmfc);
+
+                PhotosynthesisModel photosynthesis(&context);
+                FarquharModelCoefficients photoparams;
+                photosynthesis.setModelCoefficients(photoparams);
+                photosynthesis.setModelType_Farquhar();
+
+                // Load CIMIS XML file
+                if (fs::exists("../6_20_2024_CIMIS.xml")) {
+                    context.loadXML("../6_20_2024_CIMIS.xml");
+                    Time time(12, 0, 0);
+                    context.setTime(time);
+                    float air_temperature = context.queryTimeseriesData("air_temperature");
+                    float air_humidity = context.queryTimeseriesData("humidity");
+                    float wind_speed = context.queryTimeseriesData("wind_speed");
+
+                    context.setPrimitiveData(all_UUIDs, "air_temperature", air_temperature);
+                    context.setPrimitiveData(all_UUIDs, "air_humidity", air_humidity);
+                    context.setPrimitiveData(all_UUIDs, "wind_speed", wind_speed);
+
+                    boundarylayerconductance.run();
+                    stomatalconductance.run(UUIDs_leaves);
+                    energybalance.run();
+                    photosynthesis.run(UUIDs_leaves);
+                } else {
+                    std::cerr << "[WARN] CIMIS weather file ../6_20_2024_CIMIS.xml not found! Energy balance may use defaults." << std::endl;
+                }
+            }
+
+            if (args.run_temperature) {
+                std::string temp_file = radiation.writeCameraImage(
+                    cameralabel, {"LW"}, "temperature", output_dir, 0);
+                try {
+                    std::string target_path = output_dir + "/" + filename + "_lw_radiation.jpeg";
+                    if (temp_file != target_path) {
+                        fs::path src(temp_file);
+                        fs::path dst(target_path);
+                        try {
+                            fs::rename(src, dst);
+                        } catch (const fs::filesystem_error &e) {
+                            fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                            fs::remove(src);
+                        }
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Warning: failed to move LW radiation image file: " << e.what() << std::endl;
+                }
+            }
+
+            if (args.run_depth) {
+                // Export normalized depth map image (cutoff max 5.5 meters for 5.0m altitude drone cameras)
+                radiation.writeNormDepthImage(cameralabel, "depth", 5.5f, output_dir + "/", 0);
+                try {
+                    std::string depth_file = output_dir + "/" + cameralabel + "_depth_00000.jpeg";
+                    std::string target_path = output_dir + "/" + filename + "_depth.jpeg";
+                    if (fs::exists(depth_file)) {
+                        fs::path src(depth_file);
+                        fs::path dst(target_path);
+                        try {
+                            fs::rename(src, dst);
+                        } catch (const fs::filesystem_error &e) {
+                            fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                            fs::remove(src);
+                        }
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Warning: failed to move depth image file: " << e.what() << std::endl;
+                }
+            }
+
+            if (args.run_wue) {
+                std::cout << "[DEBUG] Calculating WUE and rendering image via GPU raytracing..." << std::endl;
+                std::vector<uint> UUIDs_leaves;
+                std::vector<uint> all_crop_ids = plantarchitecture.getAllPlantIDs();
+                for (uint id : all_crop_ids) {
+                    std::vector<uint> leaf_obj_ids = plantarchitecture.getPlantLeafObjectIDs(id);
+                    std::vector<uint> uuids_leaf = context.getObjectPrimitiveUUIDs(leaf_obj_ids);
+                    UUIDs_leaves.insert(UUIDs_leaves.end(), uuids_leaf.begin(), uuids_leaf.end());
+                }
+                for (uint UUID : UUIDs_leaves) {
+                    float E = 0.0f, A = 0.0f, WUE = 0.0f;
+                    context.getPrimitiveData(UUID, "latent_flux", E);
+                    context.getPrimitiveData(UUID, "net_photosynthesis", A);
+                    float transpiration = E / 44000.0f * 1000.0f; // mmol H2O / m^2 / sec
+                    if (transpiration > 1e-6f) {
+                        WUE = A / transpiration;
+                    } else {
+                        WUE = 0.0f;
+                    }
+                    context.setPrimitiveData(UUID, "WUE", WUE);
+                    context.setPrimitiveData(UUID, "emission_wue_band", WUE);
+                    context.setPrimitiveData(UUID, "reflectivity_wue_band", 0.0f);
+                    context.setPrimitiveData(UUID, "transmissivity_wue_band", 0.0f);
+                }
+                std::cout << "[SUCCESS] WUE calculated for " << UUIDs_leaves.size() << " leaves." << std::endl;
+
+                radiation.runBand("wue_band");
+                std::string wue_file = radiation.writeCameraImage(cameralabel, {"wue_band"}, "wue_raw", output_dir, 0);
+                try {
+                    std::string target_path = output_dir + "/" + filename + "_wue_raw.jpeg";
+                    if (wue_file != target_path) {
+                        fs::path src(wue_file);
+                        fs::path dst(target_path);
+                        try {
+                            fs::rename(src, dst);
+                        } catch (const fs::filesystem_error &e) {
+                            fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
+                            fs::remove(src);
+                        }
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Warning: failed to move WUE raw image file: " << e.what() << std::endl;
+                }
+            }
+
+            // Consolidated Visualizer rendering: Only run if explicitly requested via args.vis or args.gui
+            if (args.vis || args.gui) {
+                try {
+                    printGPUMemoryUsage("Before consolidated visualizer init");
+                    CameraProperties cam_prop = camera_setup.cam_prop;
+                    // Cap scientific visualizer FBO resolution to 1920x1080 max to drastically reduce VRAM overhead and prevent OOM (-9) crashes
+                    int vis_res_x = std::min(cam_prop.camera_resolution.x, 1920);
+                    int vis_res_y = std::min(cam_prop.camera_resolution.y, 1080);
+                    Visualizer vis(vis_res_x, vis_res_y, 0, true, true);
+                    vis.hideWatermark();
+                    vis.buildContextGeometry(&context);
+                    vis.setLightDirection(sphere2cart(sun_dir));
+                    if (sampled_params["environment"]["sun"].value("shadow", true)) {
+                        vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
+                    } else {
+                        vis.setLightingModel(Visualizer::LIGHTING_PHONG);
+                    }
+                    vis.setCameraPosition(camera_position, camera_lookat);
+                    float FOV_aspect_ratio = vis_res_x / float(vis_res_y);
+                    vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
+
+                    // 1. Standard RGB Mesh View
+                    if (args.vis || args.gui) {
+                        vis.plotUpdate(true);
+                        std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
+                        vis.printWindow(save_path.c_str());
+                    }
+
+                    // 2. Multispectral NIR Absorbed Energy Colorbar Overlay
+                    if (args.run_multispectral) {
+                        vis.colorContextPrimitivesByData("radiation_flux_NIR");
+                        vis.setColorbarTitle("Absorbed NIR Flux (W/m^2)");
+                        vis.setColorbarRange(0.f, 300.f);
+                        vis.setColorbarPosition(make_vec3(0.75, 0.9, 0));
+                        vis.plotUpdate(true);
+                        std::string save_path = output_dir + "/" + filename + "_multispectral_cbar.jpeg";
+                        vis.printWindow(save_path.c_str());
+                    }
+
+                    // 3. Thermal LW Absorbed Energy Colorbar Overlay
+                    if (args.run_temperature) {
+                        vis.colorContextPrimitivesByData("radiation_flux_LW");
+                        vis.setColorbarTitle("Absorbed Thermal LW Flux (W/m^2)");
+                        vis.setColorbarRange(0.f, 400.f);
+                        vis.setColorbarPosition(make_vec3(0.75, 0.9, 0));
+                        vis.plotUpdate(true);
+                        std::string save_path = output_dir + "/" + filename + "_temperature_cbar.jpeg";
+                        vis.printWindow(save_path.c_str());
+                    }
+
+                    if (args.gui) {
+                        vis.plotInteractive();
+                    }
+                } catch (const std::exception &e) {
+                    std::cerr << "Warning: failed to generate consolidated scientific visualizations: " << e.what() << std::endl;
+                }
             }
     
 

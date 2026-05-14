@@ -94,22 +94,43 @@ std::vector<helios::uint> createObjGround(helios::Context& context, const json& 
 std::vector<uint> make_field(helios::Context& context, const json& params) {
 
     auto field = params["field"];
-    auto plot_shape = field["plot_shape"];
-    int n_beds = field["num_beds"].get<int>(); 
-    int n_rows = field["num_rows"].get<int>(); 
+    json layout;
+    if (field.contains("layout")) {
+        layout = field["layout"];
+    }
     
-    std::string obj_path = plot_shape["obj_file_path"].get<std::string>();
+    json plot_shape;
+    if (field.contains("plot_shape")) {
+        plot_shape = field["plot_shape"];
+    } else if (field.contains("layout")) {
+        plot_shape = field["layout"];
+    }
+    
+    int n_beds = getJsonNumberOr<int>(field, {"num_beds"}, 
+                 getJsonNumberOr<int>(layout, {"num_beds"}, 1));
+    int n_rows = getJsonNumberOr<int>(field, {"num_rows"}, 
+                 getJsonNumberOr<int>(layout, {"num_rows"}, 1));
+    
+    std::string obj_path = getJsonStringOr(plot_shape, {"obj_file_path"}, 
+                           getJsonStringOr(params, {"environment", "soil", "obj_file_path"}, "../../../obj/dirt_rocks.obj"));
+    
+    if (obj_path.empty()) {
+        std::cerr << "Error: obj_file_path is missing in JSON parameters." << std::endl;
+        return {};
+    }
+
 
     // Manipulate mtl file before loading OBJ file
     std::string orig_mtl_path = obj_path.substr(0, obj_path.find_last_of("\\/")) + "/dirt_rocks.mtl.orig";
 
     // Replace numbers with soil color in the field
-    float soil_color[3];
+    float soil_color[3] = {0.5f, 0.4f, 0.3f}; // Default brownish color
     if (plot_shape.contains("soil_color") && plot_shape["soil_color"].is_array())
     {   
         int cnt = 0;
         for (const auto& color_val : plot_shape["soil_color"])
         {
+            if (cnt >= 3) break;
             // Push to the array
             soil_color[cnt] = color_val.get<float>();
             cnt++;
@@ -136,24 +157,35 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
         file.close();
     }
 
+    std::cout << "[DEBUG] Loading OBJ from: " << obj_path << std::endl;
     std::vector<uint> UUIDs = context.loadOBJ(obj_path.c_str(), make_vec3(0,0,0), \
-                    plot_shape["plot_size_z"], nullrotation, RGB::white);
+                    getJsonNumberOr<float>(plot_shape, {"plot_size_z"}, 0.0f), nullrotation, RGB::white);
+
+    std::cout << "[DEBUG] loadOBJ returned " << UUIDs.size() << " primitives." << std::endl;
+    if (UUIDs.empty()) {
+        std::cerr << "[WARNING] loadOBJ returned no primitives for " << obj_path << std::endl;
+    }
 
     // Rescale only X and Y to match bed dimensions, preserve Z from DEM
     // The OBJ file already has correct Z values (elevations) normalized to plant locations
-    vec3 plot_extent = make_vec3(plot_shape["plot_size_x"].get<float>(), \
-                    plot_shape["plot_size_y"].get<float>(), plot_shape["plot_size_z"].get<float>());
-    rescaleUUIDsToSize(context, UUIDs, plot_extent);
+    vec3 plot_extent = make_vec3(getJsonNumberOr<float>(plot_shape, {"plot_size_x"}, 1.299f), \
+                    getJsonNumberOr<float>(plot_shape, {"plot_size_y"}, 3.831f), getJsonNumberOr<float>(plot_shape, {"plot_size_z"}, 0.0f));
+    
+    // Set margin factor to 1.00 to perfectly match exact plot dimensions without excess overlapping
+    float margin_factor = 1.05f; // 
+    vec3 ground_extent = make_vec3(plot_extent.x * margin_factor, plot_extent.y * margin_factor, plot_extent.z);
+    
+    std::cout << "[DEBUG] Rescaling to extent: (" << ground_extent.x << ", " << ground_extent.y << ", " << ground_extent.z << ")" << std::endl;
+    rescaleUUIDsToSize(context, UUIDs, ground_extent);
+    std::cout << "[DEBUG] Rescaling complete." << std::endl;
 
     // Apply plot heading rotation if specified
-    if (plot_shape.contains("rotate_obj")) {
-        float rotate_obj = plot_shape["rotate_obj"].get<float>();
-        if (rotate_obj != 0.0f) {
-            // Convert degrees to radians and rotate around Z-axis
-            float rotate_obj_rad = rotate_obj * M_PI / 180.0f;
-            context.rotatePrimitive(UUIDs, rotate_obj_rad, "z");
-            std::cout << "Rotated ground mesh by " << rotate_obj << " degrees" << std::endl;
-        }
+    float rotate_obj = getJsonNumberOr<float>(plot_shape, {"rotate_obj"}, 0.0f);
+    if (rotate_obj != 0.0f) {
+        // Convert degrees to radians and rotate around Z-axis
+        float rotate_obj_rad = rotate_obj * M_PI / 180.0f;
+        context.rotatePrimitive(UUIDs, rotate_obj_rad, "z");
+        std::cout << "Rotated ground mesh by " << rotate_obj << " degrees" << std::endl;
     }
 
     // Compute bounding box for the original OBJ once, since it's the same for all copies
@@ -174,9 +206,9 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
                 // Append UUIDs_copy to UUIDs_total
                 UUIDs_total.insert(UUIDs_total.end(), UUIDs.begin(), UUIDs.end());
             } else {
-                // Use object extent for positioning instead of config values
-                float x = bed * extent.x;
-                float y = row * extent.y;
+                // Use exact plot extent for positioning to synchronize with plant grid and eliminate gaps
+                float x = bed * plot_extent.x;
+                float y = row * plot_extent.y;
                 float z = 0;
                 
                 // Make a vector of x y z origin

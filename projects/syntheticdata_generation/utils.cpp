@@ -242,3 +242,45 @@ float calculateFOV(float visible_length, float camera_height) {
     float FOV_rad = 2.0 * atan(visible_length / camera_height / 2.0f);
     return rad2deg(FOV_rad);
 }
+
+bool getJsonBoolOr(const json& root,
+                  std::initializer_list<const char*> keys,
+                  bool default_value) {
+    const json* current = &root;
+    for (const char* key : keys) {
+        std::cout << "[DEBUG] getJsonBoolOr checking key: " << key << std::endl;
+        if (!current->is_object() || !current->contains(key)) {
+            return default_value;
+        }
+        current = &(current->at(key));
+    }
+
+    if (current->is_null()) {
+        return default_value;
+    }
+    if (current->is_boolean()) {
+        return current->get<bool>();
+    }
+    if (current->is_number_integer()) {
+        return current->get<int>() != 0;
+    }
+    return default_value;
+}
+
+std::string getJsonStringOr(const json& root,
+                           std::initializer_list<const char*> keys,
+                           const std::string& default_value) {
+    const json* current = &root;
+    for (const char* key : keys) {
+        std::cout << "[DEBUG] getJsonStringOr checking key: " << key << std::endl;
+        if (!current->is_object() || !current->contains(key)) {
+            return default_value;
+        }
+        current = &(current->at(key));
+    }
+
+    if (current->is_null() || !current->is_string()) {
+        return default_value;
+    }
+    return current->get<std::string>();
+}
