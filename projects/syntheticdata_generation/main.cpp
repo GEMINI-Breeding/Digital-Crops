@@ -159,7 +159,17 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
         float sun_elevation_rad = deg2rad(getJsonNumberOr<float>(
             sampled_params, {"environment", "sun", "elevation_degrees"}, 45.0f));
         float sin_el = std::max(0.1f, std::sin(sun_elevation_rad));
-        iso_value = static_cast<int>(100.0f / sin_el); // Base ISO 100 for noon, scales up as sun sets
+        
+        // Calculate f-number to compensate for tiny aperture (f/43.2 vs f/2.8 reference)
+        float lens_focal_length = getJsonNumberOr<float>(cam_prop_json, {"sensor", "focal_length"}, 129.63f);
+        float lens_diameter_mm = setup.cam_prop.lens_diameter * 1000.0f; // lens_diameter is in meters
+        float f_number = lens_focal_length / std::max(lens_diameter_mm, 0.001f);
+        float ref_f_number = 2.8f;
+        float aperture_compensation = (f_number / ref_f_number) * (f_number / ref_f_number);
+        
+        float base_iso = iso_value > 0 ? (float)iso_value : 100.0f;
+        float exposure_scale = 0.25f; // Scale down exposure by 2 stops (few steps lower) to prevent too bright images
+        iso_value = static_cast<int>((base_iso * aperture_compensation * exposure_scale) / sin_el);
         
         // Write the updated ISO value back to JSON so it gets saved
         sampled_params["camera"]["sensor"]["ISO"] = iso_value;
