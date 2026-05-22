@@ -290,7 +290,7 @@
           }
         }
       },
-      "exposure_mode": "manual",
+      "exposure_mode": "ISO",
       "ISO": 100,
       "shutter_speed": "1/125",
       "lens_diameter": {

@@ -65,3 +65,4 @@ projects/syntheticdata_generation/debug_sweep_output/
 *.gif
 *.png
 *.jpeg
+projects/syntheticdata_generation/test_*

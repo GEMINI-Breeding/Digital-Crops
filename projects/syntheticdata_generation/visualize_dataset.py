@@ -50,7 +50,8 @@ from pyproj import Transformer
 # Paths configuration
 ortho_path = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/real_data/2025-06-06/Drone/2025-06-06-RGB.tif"
 geojson_path = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/Plot-Boundary-WGS84.geojson"
-helios_output_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/HELIOS_20260327/"
+#helios_output_dir = "/home/lion397/codes/Image2PlantArchitecture_v2/data/raw/2025_Davis/HELIOS_20260430"
+helios_output_dir = "/home/lion397/codes/Image2PlantArchitecture_v2/notebooks/evaluation_results/2025_Davis_temperature_0/real_fewshot_real_image_rendered/gemma4_31b"
 
 # DAP to visualize
 dap = 10
@@ -1084,7 +1085,8 @@ import glob
 from datetime import datetime
 
 # Configuration for the figure
-daps_to_visualize = [10, 30, 50, 70, 90]
+daps_to_visualize_syn = [10, 30, 50, 70, 90]
+daps_to_visualize_real = [10, 28, 49, 70, 87]
 planting_date = datetime.strptime("2025-05-27", "%Y-%m-%d")
 ortho_data_dir = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/real_data/daps"
 helios_dir = helios_output_dir
@@ -1108,7 +1110,13 @@ gdf_plots = gdf_plots.to_crs(target_crs)
 print(f"Converted to target CRS: {target_crs}")
 
 # FILTER: Bed (Column) 1-16 ONLY
-gdf_plots = gdf_plots[(gdf_plots["column"] >= 1) & (gdf_plots["column"] <= 16)]
+if 0:
+    gdf_plots = gdf_plots[(gdf_plots["column"] >= 1) & (gdf_plots["column"] <= 16)]
+else:
+    gdf_plots = gdf_plots[(gdf_plots["column"] >= 1) & 
+                            (gdf_plots["column"] <= 8) &
+                            (gdf_plots["row"] >= 1) *
+                            (gdf_plots["row"] <= 4)]
 print(f"Filtered plots to Column 1-16: {len(gdf_plots)} plots")
 
 # Print file list
@@ -1129,7 +1137,7 @@ from datetime import datetime
 from pyproj import Transformer
 
 # Create the figure with 2 rows x 5 column (5 DAPs x 2 data types)
-fig = plt.figure(figsize=(20, 11))
+fig = plt.figure(figsize=(25, 11))
 gs = fig.add_gridspec(2, 5, hspace=0.3, left=0.080, right=0.95, top=0.95, bottom=0.05)
 
 # Planting date for DAP calculation
@@ -1143,135 +1151,523 @@ with rasterio.open(ortho_files[0]) as src:
     transformer = Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
 
 # Helper function to format ticks as Lat/Lon
-def set_latlon_ticks(ax, extent_utm):
-    # extent_utm = [minx, miny, maxx, maxy]
-    # Create ticks
-    xticks_utm = np.linspace(extent_utm[0], extent_utm[2], 5)
-    yticks_utm = np.linspace(extent_utm[1], extent_utm[3], 5)
-    
-    # Transform to Lat/Lon
-    # transform takes (x, y) arrays
-    lons, lats = transformer.transform(xticks_utm, yticks_utm)
-    
-    # Set ticks and labels
-    ax.set_xticks(xticks_utm)
-    ax.set_yticks(yticks_utm)
-    ax.set_xticklabels([f"{lon:.4f}°" for lon in lons], rotation=45, fontsize=9)
-    ax.set_yticklabels([f"{lat:.4f}°" for lat in lats], rotation=45, fontsize=9)
+def set_latlon_ticks(ax, extent_latlon):
+    """Set lat/lon tick labels and correct the aspect ratio for WGS84 display.
+
+    In WGS84, 1° longitude ≠ 1° latitude in physical distance.
+    At latitude φ: 1° lon ≈ cos(φ) × 111 km, 1° lat ≈ 111 km.
+    Using aspect='equal' would distort rectangular fields to look tilted.
+    The correct aspect ratio for a lon/lat plot is 1/cos(lat_mid).
+    """
+    # extent_latlon = [lon_min, lat_min, lon_max, lat_max]
+    lon_min, lat_min, lon_max, lat_max = extent_latlon
+
+    xticks = np.linspace(lon_min, lon_max, 5)
+    yticks = np.linspace(lat_min, lat_max, 5)
+
+    ax.set_xticks(xticks)
+    ax.set_yticks(yticks)
+    ax.set_xticklabels([f"{lon:.4f}°" for lon in xticks], rotation=45, fontsize=9)
+    ax.set_yticklabels([f"{lat:.4f}°" for lat in yticks], rotation=45, fontsize=9)
     ax.set_xlabel("Longitude", fontsize=10)
     ax.set_ylabel("Latitude", fontsize=10)
 
-# --- BOTTOM ROWS: Real orthophoto data ---
-print("\nProcessing real orthophoto data (bottom rows)...")
-for idx, ortho_file in enumerate(ortho_files):
-    # if idx >= 5: break
-    # ax = fig.add_subplot(gs[5 + idx])
-    ax = fig.add_subplot(gs[idx])
-    fn = os.path.basename(ortho_file)
-    date_str_raw = fn.split("-RGB")[0]
-    dt_obj = datetime.strptime(date_str_raw[:10], "%Y-%m-%d")
-    dap_val = (dt_obj - planting_dt).days
-    
-    print(f"  Processing: {fn} -> DAP {dap_val}")
-    
-    with rasterio.open(ortho_file) as src:
-        current_extent = gdf_plots.total_bounds
-        
-        col_off = int((current_extent[0] - src.bounds.left) / src.res[0])
-        row_off = int((src.bounds.top - current_extent[3]) / src.res[1])
-        width_px = int((current_extent[2] - current_extent[0]) / src.res[0])
-        height_px = int((current_extent[3] - current_extent[1]) / src.res[1])
-        
-        window = Window(max(0, col_off), max(0, row_off), min(width_px, src.width - col_off), min(height_px, src.height - row_off))
-        ortho_crop = src.read([1, 2, 3], window=window, out_shape=(3, height_px // 5, width_px // 5))
-        ortho_crop = np.moveaxis(ortho_crop, 0, -1)
+    # Fix tilt: apply geodetically correct aspect ratio for WGS84
+    lat_mid = (lat_min + lat_max) / 2
+    ax.set_aspect(1.0 / np.cos(np.radians(lat_mid)))
 
-    ax.imshow(ortho_crop, extent=[current_extent[0], current_extent[2], current_extent[1], current_extent[3]], aspect="equal")
-    ax.set_title(f"DAP {dap_val}\n({dt_obj.strftime('%Y-%m-%d')})", fontsize=12, fontweight="bold", loc="center", pad=5)
-    set_latlon_ticks(ax, current_extent)
-    ax.grid(True, alpha=0.1, linestyle='--', color='white')
-
-# --- TOP ROWS: Synthetic data (DAP 10, 30, 50, 70, 90) ---
-print("\nProcessing synthetic data (top rows)...")
-for idx, dap in enumerate(daps_to_visualize):
-    if idx >= 5: break
-    ax = fig.add_subplot(gs[5 + idx])
-    #ax = fig.add_subplot(gs[idx])
-    
-    # Find all Helios images for this DAP
-    helios_images = glob.glob(os.path.join(helios_dir, f"dap_{dap}_plot_*_0000.jpeg"))
-    
-    if len(helios_images) == 0:
-        ax.text(0.5, 0.5, f"No data for DAP {dap}", ha="center", va="center")
-        ax.axis("off")
-        continue
-
-    # Get reference raster info
-    with rasterio.open(ortho_files[0]) as src:
-        ortho_bounds_temp = src.bounds
-        gdf_plots_reproj = gdf_plots  # Already converted to target CRS (UTM)
+if "evaluation_results" in helios_output_dir:
+    # Evaluation result visualization mode
+    methods = ["Method4_+FewshotImages", ]
+else:
+    methods = ["GT"]
+for method in methods:
+    # --- BOTTOM ROWS: Real orthophoto data ---
+    print("\nProcessing real orthophoto data (bottom rows)...")
+    for idx, ortho_file in enumerate(ortho_files):
+        # if idx >= 5: break
+        # ax = fig.add_subplot(gs[5 + idx])
+        ax = fig.add_subplot(gs[idx])
+        fn = os.path.basename(ortho_file)
+        date_str_raw = fn.split("-RGB")[0]
+        dt_obj = datetime.strptime(date_str_raw[:10], "%Y-%m-%d")
+        dap_val = (dt_obj - planting_dt).days
         
-        # Global extent from filtered plots (Column 1-16)
-        pb = gdf_plots_reproj.total_bounds
-        current_extent = [pb[0], pb[1], pb[2], pb[3]]
+        print(f"  Processing: {fn} -> DAP {dap_val}")
         
-        overview_scale = 10
-        ortho_overview_temp = src.read([1, 2, 3], out_shape=(3, src.height // overview_scale, src.width // overview_scale))
-        ortho_overview_temp = np.moveaxis(ortho_overview_temp, 0, -1)
-
-    ortho_height_temp, ortho_width_temp = ortho_overview_temp.shape[:2]
-    ortho_extent_width_temp = ortho_bounds_temp.right - ortho_bounds_temp.left
-    ortho_extent_height_temp = ortho_bounds_temp.top - ortho_bounds_temp.bottom
-    px_per_meter_x_temp = ortho_width_temp / ortho_extent_width_temp
-    px_per_meter_y_temp = ortho_height_temp / ortho_extent_height_temp
-
-    # BROWN - Graysh background canvas
-    synthetic_canvas = np.zeros_like(ortho_overview_temp)
-    synthetic_canvas[:, :, 0] = 119  # R
-    synthetic_canvas[:, :, 1] = 115   # G
-    synthetic_canvas[:, :, 2] = 102   # B
-    
-    # Overlay Helios images
-    for img_path in helios_images:
-        basename = os.path.basename(img_path)
-        parts = basename.replace(".jpeg", "").split("_")
-        col, row = int(parts[3]), int(parts[4])
-        
-        plot_gdf_temp = gdf_plots_reproj[(gdf_plots_reproj["column"] == col) & (gdf_plots_reproj["row"] == row)]
-        if len(plot_gdf_temp) > 0:
-            plot_bounds_temp = plot_gdf_temp.total_bounds
-            px_minx = int((plot_bounds_temp[0] - ortho_bounds_temp.left) * px_per_meter_x_temp)
-            px_maxx = int((plot_bounds_temp[2] - ortho_bounds_temp.left) * px_per_meter_x_temp)
-            px_miny = int((ortho_bounds_temp.top - plot_bounds_temp[3]) * px_per_meter_y_temp)
-            px_maxy = int((ortho_bounds_temp.top - plot_bounds_temp[1]) * px_per_meter_y_temp)
+        with rasterio.open(ortho_file) as src:
+            current_extent = gdf_plots.total_bounds
             
-            px_minx, px_maxx = max(0, px_minx), min(px_maxx, ortho_width_temp)
-            px_miny, px_maxy = max(0, px_miny), min(px_maxy, ortho_height_temp)
+            col_off = int((current_extent[0] - src.bounds.left) / src.res[0])
+            row_off = int((src.bounds.top - current_extent[3]) / src.res[1])
+            width_px = int((current_extent[2] - current_extent[0]) / src.res[0])
+            height_px = int((current_extent[3] - current_extent[1]) / src.res[1])
             
-            tw, th = px_maxx - px_minx, px_maxy - px_miny
-            if tw > 0 and th > 0:
-                h_img = Image.open(img_path).resize((tw, th), Image.LANCZOS)
-                synthetic_canvas[px_miny:px_maxy, px_minx:px_maxx] = np.array(h_img)
+            window = Window(max(0, col_off), max(0, row_off), min(width_px, src.width - col_off), min(height_px, src.height - row_off))
+            ortho_crop = src.read([1, 2, 3], window=window, out_shape=(3, height_px // 5, width_px // 5))
+            ortho_crop = np.moveaxis(ortho_crop, 0, -1)
 
-    ax.imshow(synthetic_canvas, extent=[ortho_bounds_temp.left, ortho_bounds_temp.right, ortho_bounds_temp.bottom, ortho_bounds_temp.top], aspect="equal")
-    ax.set_xlim(current_extent[0], current_extent[2])
-    ax.set_ylim(current_extent[1], current_extent[3])
-    
-    # Set title and axes
-    ax.set_title(f"DAP {dap}", fontsize=12, fontweight="bold", loc="center", pad=5)
-    set_latlon_ticks(ax, current_extent)
-    ax.grid(True, alpha=0.1, linestyle='--', color='white')
+        # extent order for imshow: [left, right, bottom, top] = [lon_min, lon_max, lat_min, lat_max]
+        ax.imshow(ortho_crop, extent=[current_extent[0], current_extent[2], current_extent[1], current_extent[3]], aspect="auto")
+        ax.set_title(f"DAP {dap_val}\n({dt_obj.strftime('%Y-%m-%d')})", fontsize=12, fontweight="bold", loc="center", pad=5)
+        set_latlon_ticks(ax, current_extent)  # also sets correct aspect ratio
+        ax.grid(True, alpha=0.1, linestyle='--', color='white')
+
+    # --- TOP ROWS: Synthetic data (DAP 10, 30, 50, 70, 90) ---
+    print("\nProcessing synthetic data (top rows)...")
+    for idx in range(len(daps_to_visualize_syn)):
+        if idx >= 5: break
+        ax = fig.add_subplot(gs[5 + idx])
+        #ax = fig.add_subplot(gs[idx])
+        
+        # Find all Helios images for this DAP
+        if method == 'GT':
+            dap = daps_to_visualize_syn[idx]
+            helios_images = glob.glob(os.path.join(helios_dir, f"dap_{dap}_plot_*_0000.jpeg"))
+        else:
+            dap = daps_to_visualize_real[idx]
+            # dap_10_plot_1_4_0000_Method4_+FewshotImages_0000.jpeg
+            glob_path = f"dap_{dap}_plot_*_0000_{method}_0000.jpeg"
+            helios_images = glob.glob(os.path.join(helios_dir, glob_path))
+        
+        if len(helios_images) == 0:
+            ax.text(0.5, 0.5, f"No data for DAP {dap}", ha="center", va="center")
+            ax.axis("off")
+            continue
+
+        # Get reference raster info
+        with rasterio.open(ortho_files[0]) as src:
+            ortho_bounds_temp = src.bounds
+            gdf_plots_reproj = gdf_plots  # Already converted to target CRS (UTM)
+            
+            # Global extent from filtered plots (Column 1-16)
+            pb = gdf_plots_reproj.total_bounds
+            current_extent = [pb[0], pb[1], pb[2], pb[3]]
+            
+            overview_scale = 1
+            ortho_overview_temp = src.read([1, 2, 3], out_shape=(3, src.height // overview_scale, src.width // overview_scale))
+            ortho_overview_temp = np.moveaxis(ortho_overview_temp, 0, -1)
+
+        ortho_height_temp, ortho_width_temp = ortho_overview_temp.shape[:2]
+        ortho_extent_width_temp = ortho_bounds_temp.right - ortho_bounds_temp.left
+        ortho_extent_height_temp = ortho_bounds_temp.top - ortho_bounds_temp.bottom
+        px_per_meter_x_temp = ortho_width_temp / ortho_extent_width_temp
+        px_per_meter_y_temp = ortho_height_temp / ortho_extent_height_temp
+
+        # BROWN - Graysh background canvas
+        synthetic_canvas = np.zeros_like(ortho_overview_temp)
+        synthetic_canvas[:, :, 0] = 119  # R
+        synthetic_canvas[:, :, 1] = 115   # G
+        synthetic_canvas[:, :, 2] = 102   # B
+        
+        # Overlay Helios images
+        for img_path in helios_images:
+            basename = os.path.basename(img_path)
+            parts = basename.replace(".jpeg", "").split("_")
+            col, row = int(parts[3]), int(parts[4])
+            
+            plot_gdf_temp = gdf_plots_reproj[(gdf_plots_reproj["column"] == col) & (gdf_plots_reproj["row"] == row)]
+            if len(plot_gdf_temp) > 0:
+                plot_bounds_temp = plot_gdf_temp.total_bounds
+                px_minx = int((plot_bounds_temp[0] - ortho_bounds_temp.left) * px_per_meter_x_temp)
+                px_maxx = int((plot_bounds_temp[2] - ortho_bounds_temp.left) * px_per_meter_x_temp)
+                px_miny = int((ortho_bounds_temp.top - plot_bounds_temp[3]) * px_per_meter_y_temp)
+                px_maxy = int((ortho_bounds_temp.top - plot_bounds_temp[1]) * px_per_meter_y_temp)
+                
+                px_minx, px_maxx = max(0, px_minx), min(px_maxx, ortho_width_temp)
+                px_miny, px_maxy = max(0, px_miny), min(px_maxy, ortho_height_temp)
+                
+                tw, th = px_maxx - px_minx, px_maxy - px_miny
+                if tw > 0 and th > 0:
+                    h_img = Image.open(img_path).resize((tw, th), Image.LANCZOS)
+                    synthetic_canvas[px_miny:px_maxy, px_minx:px_maxx] = np.array(h_img)
+
+        ax.imshow(synthetic_canvas, extent=[ortho_bounds_temp.left, ortho_bounds_temp.right, ortho_bounds_temp.bottom, ortho_bounds_temp.top], aspect="auto")
+        ax.set_xlim(current_extent[0], current_extent[2])
+        ax.set_ylim(current_extent[1], current_extent[3])
+
+        # Set title and axes
+        ax.set_title(f"DAP {dap}", fontsize=12, fontweight="bold", loc="center", pad=5)
+        set_latlon_ticks(ax, current_extent)  # also sets correct aspect ratio
+        ax.grid(True, alpha=0.1, linestyle='--', color='white')
 
 
 
-# Add left-side vertical labels
-fig.text(0.05, 0.75, "(a) Drone Remote Sensing", fontsize=16, fontweight="bold", rotation=90, va="center", ha="center")
-fig.text(0.05, 0.25, "(b) Synthetic Data", fontsize=16, fontweight="bold", rotation=90, va="center", ha="center")
+    # Add left-side vertical labels
+    fig.text(0.05, 0.75, "(a) Drone Remote Sensing", fontsize=16, fontweight="bold", rotation=90, va="center", ha="center")
+    fig.text(0.05, 0.25, "(b) Synthetic Data", fontsize=16, fontweight="bold", rotation=90, va="center", ha="center")
 
-save_path = "paper_figure_vertical_brown_latlon.png"
-plt.savefig(save_path, dpi=300, bbox_inches="tight")
-plt.show()
-print(f"\nFigure saved as '{save_path}'")
+    save_path = f"{method}_vertical_brown_latlon.png"
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.show()
+    print(f"\nFigure saved as '{save_path}'")
+
+if 0:
+    # %% [markdown]
+    # ## Step 9: Inference Result Visualization
+    #
+    # For each of the 5 methods, create one figure showing:
+    #   - Rows: DAP 10, 28, 49, 70, 87
+    #   - Columns: 3 panels per DAP — (A) Drone image, (B) Ground Truth plants, (C) Predicted plants
+    #
+    # Plant coordinates are in local plot coordinates (meters, origin at plot center).
+
+    # %%
+    import glob as _glob
+
+    # ── Configuration ────────────────────────────────────────────────────────────
+    inference_base = "/home/lion397/codes/Image2PlantArchitecture_v2/notebooks/evaluation_results/2025_Davis_temperature_0/real_fewshot_real_image/gemma4_31b"
+
+    METHODS = [
+        "Method1_Baseline",
+        "Method2_+Schema",
+        "Method3_+FewshotJSON",
+        "Method4_+FewshotImages",
+        "Method5_+Grounding",
+    ]
+    DAPS_INF = [10, 28, 49, 70, 87]
+
+    # Pick one representative plot per DAP to display (col=1, row=1 by default;
+    # fall back to any available plot if missing)
+    def pick_plot(dap, col=1, row=1):
+        """Return (col, row) of a plot that has all method files for the given DAP."""
+        stem = f"dap_{dap}_plot_{col}_{row}_0000"
+        gt = os.path.join(inference_base, f"{stem}_ground_truth.json")
+        if os.path.exists(gt):
+            return col, row
+        # Fallback: find any available plot
+        gts = _glob.glob(os.path.join(inference_base, f"dap_{dap}_plot_*_*_0000_ground_truth.json"))
+        if gts:
+            b = os.path.basename(gts[0])
+            parts = b.replace("_ground_truth.json", "").split("_")
+            return int(parts[3]), int(parts[4])
+        return None, None
 
 
+    def load_plants(json_path):
+        """Load plant (x, y) coordinates from a result JSON."""
+        if not os.path.exists(json_path):
+            return None, None
+        with open(json_path) as f:
+            data = json.load(f)
+        try:
+            plants = data["field"]["plots"][0]["plants"]
+            xs = [p["x"] for p in plants]
+            ys = [p["y"] for p in plants]
+            return xs, ys
+        except (KeyError, IndexError):
+            return None, None
 
+
+    # ── Generate one figure per method ───────────────────────────────────────────
+    for method_name in METHODS:
+        print(f"\n{'='*60}")
+        print(f"Rendering: {method_name}")
+        print(f"{'='*60}")
+
+        # Figure layout: 5 rows (DAPs) × 3 columns (Drone | GT | Pred)
+        n_daps = len(DAPS_INF)
+        fig_inf, axes_inf = plt.subplots(
+            n_daps, 3,
+            figsize=(9, 3 * n_daps),
+            gridspec_kw={"wspace": 0.08, "hspace": 0.35},
+        )
+
+        for row_idx, dap in enumerate(DAPS_INF):
+            col_p, row_p = pick_plot(dap)
+            if col_p is None:
+                print(f"  DAP {dap}: no plots found, skipping")
+                for c in range(3):
+                    axes_inf[row_idx, c].axis("off")
+                    axes_inf[row_idx, c].set_title(f"DAP {dap}\n(no data)", fontsize=9)
+                continue
+
+            stem = f"dap_{dap}_plot_{col_p}_{row_p}_0000"
+            png_path = os.path.join(inference_base, f"{stem}.png")
+            gt_path  = os.path.join(inference_base, f"{stem}_ground_truth.json")
+            pred_path = os.path.join(inference_base, f"{stem}_{method_name}.json")
+
+            print(f"  DAP {dap}: plot ({col_p},{row_p}) — {stem}")
+
+            # --- Panel A: Drone image ---
+            ax_img = axes_inf[row_idx, 0]
+            if os.path.exists(png_path):
+                drone_img = np.array(Image.open(png_path))
+                ax_img.imshow(drone_img)
+            else:
+                ax_img.text(0.5, 0.5, "No image", ha="center", va="center",
+                            transform=ax_img.transAxes, fontsize=9)
+            ax_img.axis("off")
+            if row_idx == 0:
+                ax_img.set_title("Drone Image", fontsize=11, fontweight="bold")
+            # DAP label on left
+            ax_img.set_ylabel(f"DAP {dap}", fontsize=10, rotation=0,
+                            labelpad=40, va="center", fontweight="bold")
+
+            # --- Panel B: Ground Truth plants ---
+            ax_gt = axes_inf[row_idx, 1]
+            gt_xs, gt_ys = load_plants(gt_path)
+            if os.path.exists(png_path):
+                ax_gt.imshow(drone_img, alpha=0.35)
+            if gt_xs is not None:
+                # Normalise local coordinates to image pixel space
+                if os.path.exists(png_path):
+                    h, w = drone_img.shape[:2]
+                    # local x: [-plot_size_x/2, +plot_size_x/2] → [0, w]
+                    # local y: [-plot_size_y/2, +plot_size_y/2] → [h, 0]  (image top = field top)
+                    with open(gt_path) as f:
+                        _d = json.load(f)
+                    sx = _d["field"]["layout"]["plot_size_x"]
+                    sy = _d["field"]["layout"]["plot_size_y"]
+                    px = [(x / sx + 0.5) * w for x in gt_xs]
+                    py = [(0.5 - y / sy) * h for y in gt_ys]
+                    ax_gt.scatter(px, py, s=25, c="#00FF88", edgecolors="black",
+                                linewidths=0.5, zorder=5, label=f"GT n={len(gt_xs)}")
+                    ax_gt.legend(loc="upper right", fontsize=7, framealpha=0.7)
+            ax_gt.axis("off")
+            if row_idx == 0:
+                ax_gt.set_title("Ground Truth", fontsize=11, fontweight="bold")
+
+            # --- Panel C: Predicted plants ---
+            ax_pred = axes_inf[row_idx, 2]
+            pred_xs, pred_ys = load_plants(pred_path)
+            if os.path.exists(png_path):
+                ax_pred.imshow(drone_img, alpha=0.35)
+            if pred_xs is not None:
+                if os.path.exists(png_path):
+                    with open(pred_path) as f:
+                        _dp = json.load(f)
+                    try:
+                        sx_p = _dp["field"]["layout"]["plot_size_x"]
+                        sy_p = _dp["field"]["layout"]["plot_size_y"]
+                    except KeyError:
+                        sx_p, sy_p = sx, sy  # fall back to GT layout
+                    px_p = [(x / sx_p + 0.5) * w for x in pred_xs]
+                    py_p = [(0.5 - y / sy_p) * h for y in pred_ys]
+                    ax_pred.scatter(px_p, py_p, s=25, c="#FF6B35", edgecolors="black",
+                                    linewidths=0.5, zorder=5, label=f"Pred n={len(pred_xs)}")
+                    ax_pred.legend(loc="upper right", fontsize=7, framealpha=0.7)
+            else:
+                ax_pred.text(0.5, 0.5, "No prediction", ha="center", va="center",
+                            transform=ax_pred.transAxes, fontsize=9, color="red")
+            ax_pred.axis("off")
+            if row_idx == 0:
+                ax_pred.set_title("Predicted", fontsize=11, fontweight="bold")
+
+        # ── Titles & save ────────────────────────────────────────────────────────
+        method_label = method_name.replace("_", " ")
+        fig_inf.suptitle(
+            f"Inference Result: {method_label}\n(gemma4_31b · real_fewshot_real_image)",
+            fontsize=13, fontweight="bold", y=1.01,
+        )
+
+        safe_name = method_name.replace("+", "plus").replace(" ", "_")
+        save_path_inf = f"paper_inference_{safe_name}.png"
+        fig_inf.savefig(save_path_inf, dpi=200, bbox_inches="tight")
+        plt.close(fig_inf)
+        print(f"  → Saved: {save_path_inf}")
+
+    print("\nAll inference figures saved.")
+
+
+    # %% [markdown]
+    # ## Step 10: Full Field Map – Inference Plant Locations
+    #
+    # For each method, generate a figure with 5 panels (one per DAP) showing:
+    #   - Background: drone orthophoto (cropped to Col 1-16 extent)
+    #   - Scatter: predicted plant positions for ALL plots, converted to geographic coords
+    #   - (Optional) Ground-truth plants in a different color
+    #
+    # Local plot coord (lx, ly) → geographic (lon, lat):
+    #   lon = plot_center_lon + lx * (plot_lon_width / plot_size_x)
+    #   lat = plot_center_lat + ly * (plot_lat_height / plot_size_y)
+    #   (local x = E-W, local y = N-S / increasing toward top of image)
+
+    # %%
+    import glob as _glob2
+
+    # ── Re-use objects already loaded above ──────────────────────────────────────
+    # gdf_plots   : GeoDataFrame in WGS84, filtered to column 1-16
+    # ortho_files : list of drone orthophoto TIF files
+    # planting_dt : planting date
+    # inference_base, METHODS, DAPS_INF, load_plants : defined in Step 9
+
+    # Build a lookup: (col, row) → plot bounds in WGS84
+    _plot_bounds_cache = {}
+    for _, _r in gdf_plots.iterrows():
+        _b = _r.geometry.bounds   # (minx, miny, maxx, maxy) in WGS84
+        _plot_bounds_cache[(_r["column"], _r["row"])] = _b
+
+    def local_to_geo(lx, ly, col, row, plot_size_x, plot_size_y):
+        """Convert local plot coordinates (meters, centre=0) to WGS84 lon/lat."""
+        if (col, row) not in _plot_bounds_cache:
+            return None, None
+        minx, miny, maxx, maxy = _plot_bounds_cache[(col, row)]
+        cx = (minx + maxx) / 2
+        cy = (miny + maxy) / 2
+        lon_per_m = (maxx - minx) / plot_size_x   # degrees/m (E-W)
+        lat_per_m = (maxy - miny) / plot_size_y   # degrees/m (N-S)
+        lon = cx + lx * lon_per_m
+        lat = cy + ly * lat_per_m
+        return lon, lat
+
+
+    def build_scatter_for_dap(dap, method_name):
+        """Return arrays of (lon, lat) for all available plots at the given DAP/method."""
+        lons_all, lats_all = [], []
+        lons_gt_all, lats_gt_all = [], []
+
+        pattern = os.path.join(inference_base,
+                            f"dap_{dap}_plot_*_*_0000_{method_name}.json")
+        pred_files = _glob2.glob(pattern)
+
+        for pred_path in pred_files:
+            b = os.path.basename(pred_path)
+            parts = b.replace(f"_{method_name}.json", "").split("_")
+            col, row = int(parts[3]), int(parts[4])
+
+            # Skip plots not in gdf_plots (column 1-16 filter)
+            if (col, row) not in _plot_bounds_cache:
+                continue
+
+            # Load prediction
+            with open(pred_path) as f:
+                pred_data = json.load(f)
+            try:
+                ps_x = pred_data["field"]["layout"]["plot_size_x"]
+                ps_y = pred_data["field"]["layout"]["plot_size_y"]
+                plants = pred_data["field"]["plots"][0]["plants"]
+            except (KeyError, IndexError):
+                continue
+
+            for p in plants:
+                lon, lat = local_to_geo(p["x"], p["y"], col, row, ps_x, ps_y)
+                if lon is not None:
+                    lons_all.append(lon)
+                    lats_all.append(lat)
+
+            # Ground truth
+            gt_path = pred_path.replace(f"_{method_name}.json", "_ground_truth.json")
+            if os.path.exists(gt_path):
+                with open(gt_path) as f:
+                    gt_data = json.load(f)
+                try:
+                    gs_x = gt_data["field"]["layout"]["plot_size_x"]
+                    gs_y = gt_data["field"]["layout"]["plot_size_y"]
+                    gt_plants = gt_data["field"]["plots"][0]["plants"]
+                    for p in gt_plants:
+                        lon, lat = local_to_geo(p["x"], p["y"], col, row, gs_x, gs_y)
+                        if lon is not None:
+                            lons_gt_all.append(lon)
+                            lats_gt_all.append(lat)
+                except (KeyError, IndexError):
+                    pass
+
+        return (np.array(lons_all), np.array(lats_all),
+                np.array(lons_gt_all), np.array(lats_gt_all))
+
+
+    # ── Load the first ortho for background (crop to plot extent) ────────────────
+    _ref_ortho = ortho_files[0]
+    _field_extent = gdf_plots.total_bounds  # [minx, miny, maxx, maxy] WGS84
+
+    # Aspect ratio correction for WGS84 display
+    _lat_mid_field = (_field_extent[1] + _field_extent[3]) / 2
+    _aspect_corr   = 1.0 / np.cos(np.radians(_lat_mid_field))
+
+    def load_ortho_crop_for_dap(ortho_file):
+        """Read the orthophoto crop for the field extent at reduced resolution."""
+        with rasterio.open(ortho_file) as src:
+            ext = gdf_plots.total_bounds
+            col_off   = int((ext[0] - src.bounds.left)  / src.res[0])
+            row_off   = int((src.bounds.top  - ext[3])   / src.res[1])
+            width_px  = int((ext[2] - ext[0]) / src.res[0])
+            height_px = int((ext[3] - ext[1]) / src.res[1])
+            win = Window(max(0, col_off), max(0, row_off),
+                        min(width_px,  src.width  - col_off),
+                        min(height_px, src.height - row_off))
+            crop = src.read([1, 2, 3], window=win,
+                            out_shape=(3, height_px // 4, width_px // 4))
+            crop = np.moveaxis(crop, 0, -1)
+        return crop
+
+
+    # ── One figure per method ─────────────────────────────────────────────────────
+    print("\n" + "="*60)
+    print("Step 10: Full-field inference map figures")
+    print("="*60)
+
+    for method_name in METHODS:
+        print(f"\nProcessing {method_name}...")
+
+        n_daps = len(DAPS_INF)
+        fig_map, axes_map = plt.subplots(
+            1, n_daps,
+            figsize=(5 * n_daps, 10),
+            gridspec_kw={"wspace": 0.05},
+        )
+
+        for col_idx, dap in enumerate(DAPS_INF):
+            ax = axes_map[col_idx]
+
+            # ── Background: matching ortho file ─────────────────────────────────
+            # Find ortho whose DAP matches
+            bg_ortho = None
+            for of in ortho_files:
+                fn = os.path.basename(of)
+                try:
+                    dt_o = datetime.strptime(fn.split("-RGB")[0][:10], "%Y-%m-%d")
+                    dap_o = (dt_o - planting_dt).days
+                    if dap_o == dap:
+                        bg_ortho = of
+                        break
+                except ValueError:
+                    pass
+            if bg_ortho is None:
+                # Closest DAP
+                bg_ortho = ortho_files[0]
+
+            bg_crop = load_ortho_crop_for_dap(bg_ortho)
+            ext = _field_extent
+            ax.imshow(bg_crop,
+                    extent=[ext[0], ext[2], ext[1], ext[3]],
+                    aspect="auto")
+            ax.set_aspect(_aspect_corr)
+            ax.set_xlim(ext[0], ext[2])
+            ax.set_ylim(ext[1], ext[3])
+
+            # ── Plot boundaries ──────────────────────────────────────────────────
+            gdf_plots.boundary.plot(ax=ax, color="white", linewidth=0.4, alpha=0.5)
+
+            # ── Scatter: predicted + GT ──────────────────────────────────────────
+            lons_p, lats_p, lons_gt, lats_gt = build_scatter_for_dap(dap, method_name)
+
+            if len(lons_gt) > 0:
+                ax.scatter(lons_gt, lats_gt, s=2, c="#00FF88",
+                        alpha=0.7, linewidths=0, label="GT", zorder=4)
+            if len(lons_p) > 0:
+                ax.scatter(lons_p, lats_p, s=2, c="#FF6B35",
+                        alpha=0.8, linewidths=0, label="Pred", zorder=5)
+
+            # ── Labels ───────────────────────────────────────────────────────────
+            ax.set_title(f"DAP {dap}", fontsize=12, fontweight="bold", pad=4)
+            ax.axis("off")
+
+            if col_idx == 0:
+                ax.legend(loc="upper left", fontsize=8, framealpha=0.8,
+                        markerscale=3)
+
+        method_label = method_name.replace("_", " ")
+        fig_map.suptitle(
+            f"Full Field Map – {method_label}\n"
+            f"(gemma4_31b · real_fewshot_real_image  |  🟢 GT  🟠 Pred)",
+            fontsize=13, fontweight="bold", y=1.01,
+        )
+
+        safe_name = method_name.replace("+", "plus").replace(" ", "_")
+        save_path_map = f"paper_fullmap_{safe_name}.png"
+        fig_map.savefig(save_path_map, dpi=200, bbox_inches="tight")
+        plt.close(fig_map)
+        print(f"  → Saved: {save_path_map}")
+
+    print("\nAll full-field map figures saved.")
