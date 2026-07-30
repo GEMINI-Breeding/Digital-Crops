@@ -46,3 +46,16 @@ include_directories("${BASE_DIRECTORY}/plugins/photosynthesis/include")
 include( "${BASE_DIRECTORY}/core/CMake_project.txt" )
 
 target_link_libraries(main PRIVATE "yaml-cpp")
+
+if(APPLE)
+    find_library(IOSURFACE_FRAMEWORK IOSurface REQUIRED)
+    find_library(METAL_FRAMEWORK Metal REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    target_link_libraries(main PRIVATE
+        ${IOSURFACE_FRAMEWORK}
+        ${METAL_FRAMEWORK}
+        ${QUARTZCORE_FRAMEWORK}
+        ${FOUNDATION_FRAMEWORK}
+    )
+endif()
