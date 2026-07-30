@@ -546,15 +546,21 @@ inline GenerationMode parseGenerationMode(const std::string &mode_str) {
 }
 
 // Command line options structure
+enum class Renderer {
+    NONE,       // Do not render any image
+    VIS,        // OpenGL visualizer image only
+    RADIATION,  // Radiation model camera image only
+    ALL         // Both visualizer and radiation model images
+};
+
 struct CommandLineOptions {
     bool rotation_view = false;
     bool grow = false;
     bool debug = false;
-    bool save_xml = true;
+    bool save_xml = true;       // Save plant structure XML files
     bool stats_only = false;
     bool gui = false;
-    bool run_radiation = true;  // Run faster if running without radiation?
-    bool vis = false; // Skip visualizer image by default
+    Renderer renderer = Renderer::ALL; // Default: render both visualizer and radiation images
     bool calibrate_color = false; // Add color calibration panel and run auto-calibration
     bool dry_run = false; // Load and validate JSON without running generation
     bool run_multispectral = false; // Generate multispectral (NIR) image
@@ -591,8 +597,10 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.grow = true;
         } else if (arg == "--stats-only") {
             options.stats_only = true;
-        } else if (arg == "--vis") {
-            options.vis = true;
+        } else if (arg == "--save-xml") {
+            options.save_xml = true;
+        } else if (arg == "--no-save-xml") {
+            options.save_xml = false;
         } else if (arg == "--gui") {
             options.gui = true;
         } else if (arg == "--focus-plant") {
@@ -603,14 +611,14 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             // Print help message
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
                       << "Options:\n"
+                      << "  --renderer MODE          Output renderer: vis, radiation, all (default), or none\n"
+                      << "  --save-xml               Save plant structure XML files (default: true)\n"
+                      << "  --no-save-xml            Skip saving XML files\n"
                       << "  -r, --rotation           Enable rotation view\n"
                       << "  -g, --grow               Enable grow mode\n"
                       << "  -d, --debug              Enable debug mode\n"
-                      << "  --xml true|false         Save XML output (default: true)\n"
                       << "  --stats-only             Only output statistics\n"
                       << "  --gui                    Enable GUI interactive mode\n"
-                      << "  --radiation true|false   Run radiation model (default: true)\n"
-                      << "  --vis                    Save visualizer image (default: true)\n"
                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
                       << "  --dry-run                Load and validate JSON without running generation\n"
                       << "  -h, --height HEIGHT      Override camera height in meters (default: from params.json)\n"
@@ -628,23 +636,18 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         }
         // Options with arguments
         else if (i + 1 < argc) {
-            if (arg == "--radiation") {
-                std::string radiation_flag = argv[++i];
-                if (radiation_flag == "false" || radiation_flag == "0") {
-                    options.run_radiation = false;
-                } else if (radiation_flag == "true" || radiation_flag == "1") {
-                    options.run_radiation = true;
+            if (arg == "--renderer") {
+                std::string renderer_flag = argv[++i];
+                if (renderer_flag == "none") {
+                    options.renderer = Renderer::NONE;
+                } else if (renderer_flag == "vis") {
+                    options.renderer = Renderer::VIS;
+                } else if (renderer_flag == "radiation") {
+                    options.renderer = Renderer::RADIATION;
+                } else if (renderer_flag == "all") {
+                    options.renderer = Renderer::ALL;
                 } else {
-                    std::printf("Invalid value for --radiation: %s (use true/false or 1/0)\n", radiation_flag.c_str());
-                }
-            } else if (arg == "--xml") {
-                std::string xml_flag = argv[++i];
-                if (xml_flag == "false" || xml_flag == "0") {
-                    options.save_xml = false;
-                } else if (xml_flag == "true" || xml_flag == "1") {
-                    options.save_xml = true;
-                } else {
-                    std::printf("Invalid value for --xml: %s (use true/false or 1/0)\n", xml_flag.c_str());
+                    std::printf("Invalid value for --renderer: %s (use vis/radiation/all/none)\n", renderer_flag.c_str());
                 }
             } else if (arg == "--calibrate-color") {
                 std::string cal_flag = argv[++i];
@@ -709,8 +712,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  save_xml: " << (options.save_xml ? "true" : "false") << std::endl;
         std::cout << "  stats_only: " << (options.stats_only ? "true" : "false") << std::endl;
         std::cout << "  gui: " << (options.gui ? "true" : "false") << std::endl;
-        std::cout << "  run_radiation: " << (options.run_radiation ? "true" : "false") << std::endl;
-        std::cout << "  vis: " << (options.vis ? "true" : "false") << std::endl;
+        std::cout << "  renderer: " << static_cast<int>(options.renderer) << " (0=none,1=vis,2=radiation,3=all)" << std::endl;
         std::cout << "  calibrate_color: " << (options.calibrate_color ? "true" : "false") << std::endl;
         std::cout << "  dry_run: " << (options.dry_run ? "true" : "false") << std::endl;
         std::cout << "  height: " << options.height << std::endl;
@@ -1026,13 +1028,16 @@ int main(int argc, char *argv[]) {
         
         LeafOptics leafoptics(&context);
         leafoptics.disableMessages();
+        const bool run_radiation = (args.renderer == Renderer::RADIATION || args.renderer == Renderer::ALL);
+        const bool run_vis = (args.renderer == Renderer::VIS || args.renderer == Renderer::ALL);
+
         std::unique_ptr<RadiationModel> radiation_ptr;
-        if (args.run_radiation) {
+        if (run_radiation) {
             try {
                 radiation_ptr = std::make_unique<RadiationModel>(&context);
             } catch (const std::exception &e) {
                 std::cerr << "Warning: GPU RadiationModel unavailable. Disabling radiation: " << e.what() << std::endl;
-                args.run_radiation = false;
+                args.renderer = Renderer::NONE;
             }
         }
         PlantArchitecture plantarchitecture(&context);
@@ -1063,15 +1068,6 @@ int main(int argc, char *argv[]) {
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
         SphericalCoord sun_dir = camera_setup.sun_dir;
-
-        // Init spectra
-        if (args.run_radiation && radiation_ptr) {
-            RadiationModel &radiation = *radiation_ptr;
-            // Initialize the radiation model
-            init_spectral_data(context, cameralabel, radiation, plantarchitecture,
-                                leafoptics, camera_setup, sampled_params,
-                                args.run_multispectral, args.run_temperature, args.run_wue);
-        }
 
         // Set up ground
         std::vector<uint> UUIDs_ground;
@@ -1483,6 +1479,15 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Init spectra after camera HFOV has been finalized (including --focus-plant)
+        // so the radiation camera is registered with the correct field of view.
+        if (run_radiation && radiation_ptr) {
+            RadiationModel &radiation = *radiation_ptr;
+            init_spectral_data(context, cameralabel, radiation, plantarchitecture,
+                                leafoptics, camera_setup, sampled_params,
+                                args.run_multispectral, args.run_temperature, args.run_wue);
+        }
+
         // Write the plant structure to an XML file
         if (args.save_xml) {
             // Track XML file paths to add to params
@@ -1541,14 +1546,14 @@ int main(int argc, char *argv[]) {
         }
         
         // Render visualizer image after radiation trace to share context and prevent memory exhaustion
-        if (g_debug_mode && !(args.vis || args.gui)) {
+        if (g_debug_mode && !(run_vis || args.gui)) {
             std::cout << "Skipping visualizer image save for: " << filename
-                      << " (save_visualizer=false)" << std::endl;
+                      << " (renderer does not include vis)" << std::endl;
         }
 
 
-        // Consolidated Visualizer rendering: Run if requested via args.vis or args.gui
-        if (args.vis || args.gui) {
+        // Consolidated Visualizer rendering: Run if requested via --renderer vis/all or --gui
+        if (run_vis || args.gui) {
             try {
                 printGPUMemoryUsage("Before consolidated visualizer init");
                 CameraProperties cam_prop = camera_setup.cam_prop;
@@ -1564,12 +1569,12 @@ int main(int argc, char *argv[]) {
                     vis.setLightingModel(Visualizer::LIGHTING_PHONG);
                 }
                 vis.buildContextGeometry(&context);
-                vis.addSkyDomeByCenter(20, make_vec3(0, 0, 0), 30, "plugins/visualizer/textures/SkyDome_clouds.jpg");
+                vis.setBackgroundSkyTexture("plugins/visualizer/textures/SkyDome_clouds.jpg", 30);
                 vis.setCameraPosition(camera_position, camera_lookat);
                 float FOV_aspect_ratio = vis_res_x / float(vis_res_y);
                 vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
 
-                if (args.vis || args.gui) {
+                if (run_vis || args.gui) {
                     vis.plotUpdate(true);
                     std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
                     vis.printWindow(save_path.c_str());
@@ -1584,8 +1589,8 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Run radiation model by default true
-        if (args.run_radiation && radiation_ptr) {
+        // Run radiation model
+        if (run_radiation && radiation_ptr) {
           try {
             RadiationModel &radiation = *radiation_ptr;
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
@@ -1618,9 +1623,9 @@ int main(int argc, char *argv[]) {
             std::string image_file = radiation.writeCameraImage(
                 cameralabel, {"red", "green", "blue"}, "RGB", output_dir, 0);
 
-            // move image_file to output_dir/<filename>.jpeg
+            // move image_file to output_dir/<filename>_rad.jpeg
             try {
-                std::string target_path = output_dir + "/" + filename + ".jpeg";
+                std::string target_path = output_dir + "/" + filename + "_rad.jpeg";
                 if (image_file != target_path) {
                     fs::path src(image_file);
                     fs::path dst(target_path);

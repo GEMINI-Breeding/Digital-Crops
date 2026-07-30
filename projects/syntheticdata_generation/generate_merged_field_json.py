@@ -181,14 +181,13 @@ def generate_merged_json(dap=10, start_bed=1, end_bed=2,
     ]
 
     if sim_mode == "vis":
-        cmd.extend(["--vis", "--radiation", "false"])
+        cmd.extend(["--renderer", "vis"])
     else:
-        cmd.extend(["--radiation", "true"])
-        
+        cmd.extend(["--renderer", "radiation"])
+
     if not write_xml:
-        cmd.extend(["--xml", "false"])
-    else:
-        cmd.extend(["--xml", "true"])
+        cmd.extend(["--no-save-xml"])
+
         
     if sim_flags is None:
         sim_flags = {"multispectral": False, "temperature": True, "depth": True, "wue": False}

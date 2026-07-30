@@ -370,7 +370,7 @@ class AmigaStitchDataset:
         command = ""
         command += f"cd {self.program_path} && ./main " 
         # command += f"-h 1.0 -o {output_path} -seed {seed} -name {image_name} --xml -tile none -g"
-        command += f"-h 1.0 -o {output_path} -n {output_name} -p {params_path} --xml"
+        command += f"-h 1.0 -o {output_path} -n {output_name} -p {params_path} --save-xml"
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
 

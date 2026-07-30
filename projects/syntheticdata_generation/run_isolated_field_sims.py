@@ -52,11 +52,11 @@ def run_single_simulation(task_info):
     ]
     
     if sim_mode == "vis":
-        cmd.extend(["--vis", "--radiation", "false"])
+        cmd.extend(["--renderer", "vis"])
     else:
-        cmd.extend(["--radiation", "true"])
-        
-    cmd.extend(["--xml", "false"])
+        cmd.extend(["--renderer", "radiation"])
+
+    cmd.extend(["--no-save-xml"])
     cmd.extend(["--temperature", "true"])
     cmd.extend(["--depth", "true"])
     cmd.extend(["--multispectral", "false"])
