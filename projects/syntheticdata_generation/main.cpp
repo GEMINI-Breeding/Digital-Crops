@@ -561,8 +561,10 @@ struct CommandLineOptions {
     bool run_temperature = false; // Generate temperature (LW) image
     bool run_depth = false; // Generate depth map image
     bool run_wue = false; // Generate Water-Use Efficiency (WUE) image
+    bool focus_plant = false; // Auto-fit FOV to plant bounding box + 5% margin
     float height = 1.0f;
-    int days = 0;
+    float fov = -1.0f; // -1 means "not set" (use auto-calculated value)
+    int dap = -1; // -1 means "not set" (use value from JSON)
     unsigned int seed = 0;
     int num_iterations = 1;
     std::string tile_file;
@@ -593,6 +595,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             options.vis = true;
         } else if (arg == "--gui") {
             options.gui = true;
+        } else if (arg == "--focus-plant") {
+            options.focus_plant = true;
         } else if (arg == "--dry-run") {
             options.dry_run = true;
         } else if (arg == "--help") {
@@ -609,11 +613,13 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --vis                    Save visualizer image (default: true)\n"
                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
                       << "  --dry-run                Load and validate JSON without running generation\n"
-                      << "  -h, --height HEIGHT      Set height value (default: 1.0)\n"
+                      << "  -h, --height HEIGHT      Override camera height in meters (default: from params.json)\n"
+                      << "  --fov DEGREES            Override horizontal FOV in degrees (default: auto-calculated from field size)\n"
+                      << "  --focus-plant            Auto-fit FOV to plant bounding box + 5% margin (overrides --fov)\n"
                       << "  -t, --tile FILE          Set tile file path\n"
                       << "  -o, --output DIR         Set output directory (default: from params.json)\n"
                       << "  -f, --file FILE          Set plant param file\n"
-                      << "  --days N                 Set number of days (default: 0)\n"
+                      << "  --dap N, --days N        Override DAP (days-after-planting) from JSON metadata (e.g. --dap 10)\n"
                       << "  -s, --seed N             Set random seed (default: random)\n"
                       << "  -n, --name NAME          Set output name (default: 'plot')\n"
                       << "  -i, --iteration N        Set iterations (default: 0)\n"
@@ -673,8 +679,10 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.output_dir = argv[++i];
             } else if (arg == "-n" || arg == "--name") {
                 options.output_name = argv[++i];
-            } else if (arg == "--days") {
-                options.days = std::stoi(argv[++i]);
+            } else if (arg == "--days" || arg == "--dap") {
+                options.dap = std::stoi(argv[++i]);
+            } else if (arg == "--fov") {
+                options.fov = std::stof(argv[++i]);
             } else if (arg == "-s" || arg == "--seed") {
                 options.seed = static_cast<unsigned int>(std::stoi(argv[++i]));
                 std::printf("Seed: %u\n", options.seed);
@@ -706,7 +714,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         std::cout << "  calibrate_color: " << (options.calibrate_color ? "true" : "false") << std::endl;
         std::cout << "  dry_run: " << (options.dry_run ? "true" : "false") << std::endl;
         std::cout << "  height: " << options.height << std::endl;
-        std::cout << "  days: " << options.days << std::endl;
+        std::cout << "  dap: " << options.dap << std::endl;
         std::cout << "  seed: " << options.seed << std::endl;
         std::cout << "  num_iterations: " << options.num_iterations << std::endl;
         std::cout << "  tile_file: '" << options.tile_file << "'" << std::endl;
@@ -1018,7 +1026,15 @@ int main(int argc, char *argv[]) {
         
         LeafOptics leafoptics(&context);
         leafoptics.disableMessages();
-        RadiationModel radiation(&context);
+        std::unique_ptr<RadiationModel> radiation_ptr;
+        if (args.run_radiation) {
+            try {
+                radiation_ptr = std::make_unique<RadiationModel>(&context);
+            } catch (const std::exception &e) {
+                std::cerr << "Warning: GPU RadiationModel unavailable. Disabling radiation: " << e.what() << std::endl;
+                args.run_radiation = false;
+            }
+        }
         PlantArchitecture plantarchitecture(&context);
         std::cout << "[DEBUG] Context and models initialized." << std::endl;
         
@@ -1028,16 +1044,29 @@ int main(int argc, char *argv[]) {
         std::string filename = filename_stream.str();
 
 
+        // Allow --height command-line argument to override camera_height in JSON
+        if (args.height > 0.0f) {
+            sampled_params["camera"]["positioning"]["camera_height"] = args.height;
+            std::cout << "[INFO] Camera height overridden by --height flag: " << args.height << " m" << std::endl;
+        }
+
         // Set camera
         //std::string cameralabel = "camera";
         std::string cameralabel = "camera";
         CameraSetup camera_setup = init_camera(context, plantarchitecture, sampled_params);
+
+        // Allow --fov command-line argument to override the auto-calculated HFOV
+        if (args.fov > 0.0f) {
+            camera_setup.cam_prop.HFOV = args.fov;
+            std::cout << "[INFO] HFOV overridden by --fov flag: " << args.fov << " degrees" << std::endl;
+        }
         vec3 camera_position = camera_setup.camera_position;
         vec3 camera_lookat = camera_setup.camera_lookat;
         SphericalCoord sun_dir = camera_setup.sun_dir;
 
         // Init spectra
-        if (args.run_radiation) {
+        if (args.run_radiation && radiation_ptr) {
+            RadiationModel &radiation = *radiation_ptr;
             // Initialize the radiation model
             init_spectral_data(context, cameralabel, radiation, plantarchitecture,
                                 leafoptics, camera_setup, sampled_params,
@@ -1084,48 +1113,6 @@ int main(int argc, char *argv[]) {
             std::cout << "[DEBUG] Calling make_field with sampled_params..." << std::endl;
             UUIDs_ground = make_field(context, sampled_params);
             std::cout << "[DEBUG] make_field returned " << UUIDs_ground.size() << " primitives." << std::endl;
-            
-            // Calculate bounding box of the generated 3D ground to find the true minimum elevation (z)
-            helios::vec3 min_c, max_c, ext;
-            getBoundingBoxAndExtent(context, UUIDs_ground, min_c, max_c, ext);
-            float pad_z = min_c.z + 0.01f; // Position padding tile exactly 1cm below the lowest point of the terrain
-            
-            // Add a large background padding tile slightly beneath the 3D OBJ ground
-            // to perfectly cover any camera FOV margins and prevent black border artifacts.
-            float single_plot_x = getJsonNumberOr<float>(sampled_params, {"field", "layout", "plot_size_x"}, 1.299f);
-            float single_plot_y = getJsonNumberOr<float>(sampled_params, {"field", "layout", "plot_size_y"}, 3.831f);
-            int num_beds = getJsonNumberOr<int>(sampled_params, {"field", "num_beds"}, 1);
-            int num_rows = getJsonNumberOr<int>(sampled_params, {"field", "num_rows"}, 1);
-            
-            float pad_ground_x = single_plot_x * num_beds * 1.50f;
-            float pad_ground_y = single_plot_y * num_rows * 1.50f;
-            helios::vec3 pad_center = make_vec3(single_plot_x * (num_beds - 1) * 0.5f, single_plot_y * (num_rows - 1) * 0.5f, pad_z);
-            helios::vec2 pad_field_size = make_vec2(pad_ground_x, pad_ground_y);
-            helios::vec2 pad_tile_size = make_vec2(0.1f, 0.1f);
-            
-            // Mirror native Nyquist subsampling logic based on camera resolution to avoid sampling artifacts
-            auto cam_config = sampled_params["camera"];
-            int camera_res_x = getJsonNumberOr<int>(cam_config, {"sensor", "resolution_x"}, 720);
-            int camera_res_y = getJsonNumberOr<int>(cam_config, {"sensor", "resolution_y"}, 720);
-            float pixel_plot_size_x = pad_ground_x / camera_res_x;
-            float pixel_plot_size_y = pad_ground_y / camera_res_y;
-            float pixel_size = std::max(pixel_plot_size_x, pixel_plot_size_y);
-            float desired_patch_size = pixel_size * 0.5f;
-            
-            int subdiv_x = std::max(100, (int)(pad_ground_x / desired_patch_size));
-            int subdiv_y = std::max(100, (int)(pad_ground_y / desired_patch_size));
-            const int MAX_SUBDIV_PER_AXIS = 1024;
-            int clamped_subdiv_x = std::min(subdiv_x, MAX_SUBDIV_PER_AXIS);
-            int clamped_subdiv_y = std::min(subdiv_y, MAX_SUBDIV_PER_AXIS);
-            
-            int2 pad_repeat = make_int2(round(pad_ground_x / pad_tile_size.x), round(pad_ground_y / pad_tile_size.y));
-            
-            std::vector<uint> UUIDs_pad = context.addTile(
-                pad_center, pad_field_size, make_SphericalCoord(0, 0), make_int2(clamped_subdiv_x, clamped_subdiv_y),
-                "plugins/visualizer/textures/dirt.jpg", pad_repeat);
-                
-            UUIDs_ground.insert(UUIDs_ground.end(), UUIDs_pad.begin(), UUIDs_pad.end());
-            std::cout << "[DEBUG] Background padding tile added at z=" << pad_z << " with " << clamped_subdiv_x << "x" << clamped_subdiv_y << " subdivisions." << std::endl;
         } else {
             // Calculate pixel size on ground based on camera FOV and resolution from params
             auto cam_config = sampled_params["camera"];
@@ -1176,26 +1163,49 @@ int main(int argc, char *argv[]) {
                     std::cout << "  Subdivision (clamped): " << clamped_subdiv_x << " x " << clamped_subdiv_y << std::endl;
                 }
             }
-            // Keep texture repeat tied to visual tiling
-            int2 texture_repeat = make_int2(round(ground_x / tile_size.x), round(ground_y / tile_size.y));
-            UUIDs_ground = context.addTile(tile_center, field_size,
-                                           make_SphericalCoord(0, 0),
-                                           make_int2(clamped_subdiv_x, clamped_subdiv_y),
-                                           "plugins/visualizer/textures/dirt.jpg",
-                                           texture_repeat);
+            // ROOT CAUSE: addTile stores texture UV in patch's vertex data but does NOT set
+            // material.texture_file. Visualizer::buildContextGeometry reads getPrimitiveTextureFile()
+            // which returns material.texture_file — so it gets an empty string and renders solid black.
+            // addPatch WITH a texture path DOES set material.texture_file correctly → works in Visualizer.
+            //
+            // SOLUTION: Use both:
+            //   1. addPatch("dirt.jpg") → Visualizer texture rendering
+            //   2. addTile (no texture, subdivided) → radiation model fine-grained shadow computation
+            // Both at z=0 so they overlap. addTile primitives are invisible to Visualizer (no texture_file)
+            // but provide radiation absorption surface with high spatial resolution.
+
+            // (1) Single textured patch for Visualizer
+            uint patch_uuid = context.addPatch(
+                tile_center,
+                field_size,
+                make_SphericalCoord(0.f, 0.f),
+                "plugins/visualizer/textures/dirt.jpg"
+            );
+            UUIDs_ground.push_back(patch_uuid);
+
+            // (2) Fine-subdivided tile for radiation model shadow resolution
+            int2 tile_subdiv = make_int2(clamped_subdiv_x, clamped_subdiv_y);
+            std::vector<uint> UUIDs_radiation_tile = context.addTile(
+                make_vec3(0, 0, -0.0001f), // slightly below so no z-fighting with visual patch
+                field_size,
+                make_SphericalCoord(0, 0),
+                tile_subdiv
+            );
+            UUIDs_ground.insert(UUIDs_ground.end(), UUIDs_radiation_tile.begin(), UUIDs_radiation_tile.end());
         }
-        // Set default color for soil
-        context.setPrimitiveData(
-            UUIDs_ground, "reflectivity_spectrum",
-            getJsonStringOr(
-                sampled_params,
-                {"environment", "soil", "spectral_data", "reflectivity"},
-                "soil_reflectivity_0003"));
-        // Make the ground plane single-sided (only visible from above)
-        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 0u);
-        // Set ground specular exponent from JSON
-        float ground_specular = sampled_params["environment"]["soil"].value("specular_exponent", 5.0f);
-        context.setPrimitiveData(UUIDs_ground, "specular_exponent", ground_specular);
+        if (use_obj_ground) {
+            // Set default color and specular for soil when using 3D obj ground
+            context.setPrimitiveData(
+                UUIDs_ground, "reflectivity_spectrum",
+                getJsonStringOr(
+                    sampled_params,
+                    {"environment", "soil", "spectral_data", "reflectivity"},
+                    "soil_reflectivity_0003"));
+            float ground_specular = sampled_params["environment"]["soil"].value("specular_exponent", 5.0f);
+            context.setPrimitiveData(UUIDs_ground, "specular_exponent", ground_specular);
+        }
+        // Make the ground plane double-sided so it is visible from all camera angles
+        context.setPrimitiveData(UUIDs_ground, "twosided_flag", 1u);
         
         // Add explicit Longwave (LW) band radiative properties for soil ground
         context.setPrimitiveData(UUIDs_ground, "reflectivity_LW", 0.05f);
@@ -1419,6 +1429,11 @@ int main(int argc, char *argv[]) {
         if (!plant_IDs_aging.empty()) {
             // plants are planted in a single day -> Age all together
             // Therefore there is no dap in plants element
+            // Allow --dap command-line argument to override the JSON metadata value
+            if (args.dap >= 0) {
+                sampled_params["metadata"]["dap"] = args.dap;
+                std::cout << "[INFO] DAP overridden by --dap flag: " << args.dap << " days" << std::endl;
+            }
             float dap = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
             if (dap > 0) {
                 //plantarchitecture.advanceTime(plant_IDs_aging, dap);
@@ -1432,6 +1447,41 @@ int main(int argc, char *argv[]) {
             }
         }
         update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
+
+        // --focus-plant: recalculate HFOV to fit all plant primitives' XY bounding box + 5% margin
+        if (args.focus_plant) {
+            float bb_min_x = std::numeric_limits<float>::max();
+            float bb_min_y = std::numeric_limits<float>::max();
+            float bb_max_x = std::numeric_limits<float>::lowest();
+            float bb_max_y = std::numeric_limits<float>::lowest();
+
+            for (uint plantID : UUIDs_plants) {
+                std::vector<uint> plant_uuids = plantarchitecture.getAllPlantUUIDs(plantID);
+                for (uint uuid : plant_uuids) {
+                    std::vector<helios::vec3> verts = context.getPrimitiveVertices(uuid);
+                    for (const auto& v : verts) {
+                        bb_min_x = std::min(bb_min_x, v.x);
+                        bb_min_y = std::min(bb_min_y, v.y);
+                        bb_max_x = std::max(bb_max_x, v.x);
+                        bb_max_y = std::max(bb_max_y, v.y);
+                    }
+                }
+            }
+
+            if (bb_max_x > bb_min_x && bb_max_y > bb_min_y) {
+                float span_x = (bb_max_x - bb_min_x) * 1.05f; // +5% margin
+                float span_y = (bb_max_y - bb_min_y) * 1.05f;
+                float max_span = std::max(span_x, span_y);
+                float cam_h = camera_setup.camera_position.z;
+                float new_hfov = calculateFOV(max_span, cam_h);
+                std::cout << "[INFO] --focus-plant: plant XY span = " << span_x << " x " << span_y
+                          << " m, camera_height = " << cam_h
+                          << " m, new HFOV = " << new_hfov << " deg" << std::endl;
+                camera_setup.cam_prop.HFOV = new_hfov;
+            } else {
+                std::cout << "[WARN] --focus-plant: could not compute plant bounding box, keeping original FOV" << std::endl;
+            }
+        }
 
         // Write the plant structure to an XML file
         if (args.save_xml) {
@@ -1497,8 +1547,47 @@ int main(int argc, char *argv[]) {
         }
 
 
+        // Consolidated Visualizer rendering: Run if requested via args.vis or args.gui
+        if (args.vis || args.gui) {
+            try {
+                printGPUMemoryUsage("Before consolidated visualizer init");
+                CameraProperties cam_prop = camera_setup.cam_prop;
+                int vis_res_x = std::min(cam_prop.camera_resolution.x, 1920);
+                int vis_res_y = std::min(cam_prop.camera_resolution.y, 1080);
+                // Use standard windowed GLFW mode (headless=false) so OpenGL FBO context initializes properly
+                Visualizer vis(vis_res_x, vis_res_y, 0, true, false);
+                vis.hideWatermark();
+                vis.setLightDirection(sphere2cart(sun_dir));
+                if (sampled_params["environment"]["sun"].value("shadow", true)) {
+                    vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
+                } else {
+                    vis.setLightingModel(Visualizer::LIGHTING_PHONG);
+                }
+                vis.buildContextGeometry(&context);
+                vis.addSkyDomeByCenter(20, make_vec3(0, 0, 0), 30, "plugins/visualizer/textures/SkyDome_clouds.jpg");
+                vis.setCameraPosition(camera_position, camera_lookat);
+                float FOV_aspect_ratio = vis_res_x / float(vis_res_y);
+                vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
+
+                if (args.vis || args.gui) {
+                    vis.plotUpdate(true);
+                    std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
+                    vis.printWindow(save_path.c_str());
+                    std::cout << "[SUCCESS] Saved Visualizer image to: " << save_path << std::endl;
+                }
+
+                if (args.gui) {
+                    vis.plotInteractive();
+                }
+            } catch (const std::exception &e) {
+                std::cerr << "Warning: failed to generate consolidated scientific visualizations: " << e.what() << std::endl;
+            }
+        }
+
         // Run radiation model by default true
-        if (args.run_radiation) {
+        if (args.run_radiation && radiation_ptr) {
+          try {
+            RadiationModel &radiation = *radiation_ptr;
             std::vector<std::string> bandlabels = {"red", "green", "blue"};
             if (args.run_multispectral) {
                 bandlabels.push_back("NIR");
@@ -1783,63 +1872,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // Consolidated Visualizer rendering: Only run if explicitly requested via args.vis or args.gui
-            if (args.vis || args.gui) {
-                try {
-                    printGPUMemoryUsage("Before consolidated visualizer init");
-                    CameraProperties cam_prop = camera_setup.cam_prop;
-                    // Cap scientific visualizer FBO resolution to 1920x1080 max to drastically reduce VRAM overhead and prevent OOM (-9) crashes
-                    int vis_res_x = std::min(cam_prop.camera_resolution.x, 1920);
-                    int vis_res_y = std::min(cam_prop.camera_resolution.y, 1080);
-                    Visualizer vis(vis_res_x, vis_res_y, 0, true, true);
-                    vis.hideWatermark();
-                    vis.buildContextGeometry(&context);
-                    vis.setLightDirection(sphere2cart(sun_dir));
-                    if (sampled_params["environment"]["sun"].value("shadow", true)) {
-                        vis.setLightingModel(Visualizer::LIGHTING_PHONG_SHADOWED);
-                    } else {
-                        vis.setLightingModel(Visualizer::LIGHTING_PHONG);
-                    }
-                    vis.setCameraPosition(camera_position, camera_lookat);
-                    float FOV_aspect_ratio = vis_res_x / float(vis_res_y);
-                    vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
 
-                    // 1. Standard RGB Mesh View
-                    if (args.vis || args.gui) {
-                        vis.plotUpdate(true);
-                        std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
-                        vis.printWindow(save_path.c_str());
-                    }
-
-                    // 2. Multispectral NIR Absorbed Energy Colorbar Overlay
-                    if (args.run_multispectral) {
-                        vis.colorContextPrimitivesByData("radiation_flux_NIR");
-                        vis.setColorbarTitle("Absorbed NIR Flux (W/m^2)");
-                        vis.setColorbarRange(0.f, 300.f);
-                        vis.setColorbarPosition(make_vec3(0.75, 0.9, 0));
-                        vis.plotUpdate(true);
-                        std::string save_path = output_dir + "/" + filename + "_multispectral_cbar.jpeg";
-                        vis.printWindow(save_path.c_str());
-                    }
-
-                    // 3. Thermal LW Absorbed Energy Colorbar Overlay
-                    if (args.run_temperature) {
-                        vis.colorContextPrimitivesByData("radiation_flux_LW");
-                        vis.setColorbarTitle("Absorbed Thermal LW Flux (W/m^2)");
-                        vis.setColorbarRange(0.f, 400.f);
-                        vis.setColorbarPosition(make_vec3(0.75, 0.9, 0));
-                        vis.plotUpdate(true);
-                        std::string save_path = output_dir + "/" + filename + "_temperature_cbar.jpeg";
-                        vis.printWindow(save_path.c_str());
-                    }
-
-                    if (args.gui) {
-                        vis.plotInteractive();
-                    }
-                } catch (const std::exception &e) {
-                    std::cerr << "Warning: failed to generate consolidated scientific visualizations: " << e.what() << std::endl;
-                }
-            }
     
 
             // Export bounding boxes and segmentation masks in COCO format
@@ -1883,6 +1916,9 @@ int main(int argc, char *argv[]) {
             } catch (const std::exception &e) {
                 std::cerr << "Warning: failed to rename camera metadata file: " << e.what() << std::endl;
             }
+          } catch (const std::exception &e) {
+              std::cerr << "Warning: Radiation GPU model skipped (Visualizer & XML mode): " << e.what() << std::endl;
+          }
         }
     }
 

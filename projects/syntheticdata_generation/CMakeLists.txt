@@ -32,8 +32,14 @@ set( EXECUTABLE_NAME "main" )
 set( SOURCE_FILES "main.cpp;utils.cpp;field.cpp" )
 
 #specify which plug-ins to use (separate plug-in names with semicolon)
-#set( PLUGINS "visualizer;canopygenerator;radiation;syntheticannotation;solarposition;energybalance")
-set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition;plantarchitecture;radiation;leafoptics")
+set( PLUGINS "visualizer;canopygenerator;syntheticannotation;solarposition;plantarchitecture;leafoptics;radiation;energybalance;photosynthesis;stomatalconductance;boundarylayerconductance")
+
+include_directories("${BASE_DIRECTORY}/plugins/radiation/include")
+include_directories("${BASE_DIRECTORY}/plugins/radiation/lib/json")
+include_directories("${BASE_DIRECTORY}/plugins/energybalance/include")
+include_directories("${BASE_DIRECTORY}/plugins/boundarylayerconductance/include")
+include_directories("${BASE_DIRECTORY}/plugins/stomatalconductance/include")
+include_directories("${BASE_DIRECTORY}/plugins/photosynthesis/include")
 
 
 #-------- DO NOT MODIFY ---------#
