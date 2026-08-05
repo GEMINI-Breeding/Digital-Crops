@@ -579,7 +579,7 @@ struct CommandLineOptions {
     bool run_depth = false; // Generate depth map image
     bool run_wue = false; // Generate Water-Use Efficiency (WUE) image
     int focus_plant = -1; // -1 = use JSON, 0 = disable, 1 = enable auto-fit FOV to plant bounding box + 5% margin
-    float height = 1.0f;
+    float height = 0.0f;  // Default empty value 
     float fov = -1.0f; // -1 means "not set" (use auto-calculated value)
     int dap = -1; // -1 means "not set" (use value from JSON)
     unsigned int seed = 0;
@@ -1608,7 +1608,7 @@ int main(int argc, char *argv[]) {
                 vis.setCameraFieldOfView(HFOVtoVFOV(cam_prop.HFOV, FOV_aspect_ratio));
 
                 if (run_vis || args.gui) {
-                    vis.plotUpdate(true);
+                    //vis.plotUpdate(true); // Comment out this line to make a faster rendering
                     std::string save_path = output_dir + "/" + filename + "_vis.jpeg";
                     vis.printWindow(save_path.c_str());
                     std::cout << "[SUCCESS] Saved Visualizer image to: " << save_path << std::endl;
