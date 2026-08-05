@@ -167,7 +167,18 @@ CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, 
         float ref_f_number = 2.8f;
         float aperture_compensation = (f_number / ref_f_number) * (f_number / ref_f_number);
         
-        float base_iso = iso_value > 0 ? (float)iso_value : 100.0f;
+        // Prevent double-compensation of ISO when re-loading an output params.json
+        // that already contains a dynamically-computed ISO value.
+        // Template ISO is typically 100; after one init_camera() pass it becomes ~6k–68k.
+        float base_iso;
+        if (iso_value > 1000) {
+            std::cout << "[WARN] ISO value " << iso_value
+                      << " appears pre-computed. Resetting base_iso to 100 to avoid double-compensation."
+                      << std::endl;
+            base_iso = 100.0f;
+        } else {
+            base_iso = iso_value > 0 ? (float)iso_value : 100.0f;
+        }
         float exposure_scale = 0.25f; // Scale down exposure by 2 stops (few steps lower) to prevent too bright images
         iso_value = static_cast<int>((base_iso * aperture_compensation * exposure_scale) / sin_el);
         
@@ -567,7 +578,7 @@ struct CommandLineOptions {
     bool run_temperature = false; // Generate temperature (LW) image
     bool run_depth = false; // Generate depth map image
     bool run_wue = false; // Generate Water-Use Efficiency (WUE) image
-    bool focus_plant = false; // Auto-fit FOV to plant bounding box + 5% margin
+    int focus_plant = -1; // -1 = use JSON, 0 = disable, 1 = enable auto-fit FOV to plant bounding box + 5% margin
     float height = 1.0f;
     float fov = -1.0f; // -1 means "not set" (use auto-calculated value)
     int dap = -1; // -1 means "not set" (use value from JSON)
@@ -604,7 +615,21 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
         } else if (arg == "--gui") {
             options.gui = true;
         } else if (arg == "--focus-plant") {
-            options.focus_plant = true;
+            // Boolean flag that can optionally be followed by true/false to override JSON
+            if (i + 1 < argc) {
+                std::string focus_flag = argv[i + 1];
+                if (focus_flag == "false" || focus_flag == "0") {
+                    options.focus_plant = 0;
+                    ++i;
+                } else if (focus_flag == "true" || focus_flag == "1") {
+                    options.focus_plant = 1;
+                    ++i;
+                } else {
+                    options.focus_plant = 1; // no value: just enable
+                }
+            } else {
+                options.focus_plant = 1;
+            }
         } else if (arg == "--dry-run") {
             options.dry_run = true;
         } else if (arg == "--help") {
@@ -619,12 +644,12 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  -d, --debug              Enable debug mode\n"
                       << "  --stats-only             Only output statistics\n"
                       << "  --gui                    Enable GUI interactive mode\n"
-                      << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
-                      << "  --dry-run                Load and validate JSON without running generation\n"
-                      << "  -h, --height HEIGHT      Override camera height in meters (default: from params.json)\n"
-                      << "  --fov DEGREES            Override horizontal FOV in degrees (default: auto-calculated from field size)\n"
-                      << "  --focus-plant            Auto-fit FOV to plant bounding box + 5% margin (overrides --fov)\n"
-                      << "  -t, --tile FILE          Set tile file path\n"
+                       << "  --calibrate-color true|false  Add color calibration panel and auto-calibrate output image (default: false)\n"
+                       << "  --dry-run                Load and validate JSON without running generation\n"
+                       << "  -h, --height HEIGHT      Override camera height in meters (default: from params.json)\n"
+                       << "  --fov DEGREES            Override horizontal FOV in degrees (default: auto-calculated from field size)\n"
+                       << "  --focus-plant [true|false] Auto-fit FOV to plant bounding box + 5% margin (overrides --fov and JSON focusing_plants)\n"
+                       << "  -t, --tile FILE          Set tile file path\n"
                       << "  -o, --output DIR         Set output directory (default: from params.json)\n"
                       << "  -f, --file FILE          Set plant param file\n"
                       << "  --dap N, --days N        Override DAP (days-after-planting) from JSON metadata (e.g. --dap 10)\n"
@@ -1444,8 +1469,14 @@ int main(int argc, char *argv[]) {
         }
         update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
 
-        // --focus-plant: recalculate HFOV to fit all plant primitives' XY bounding box + 5% margin
-        if (args.focus_plant) {
+        // Determine whether to apply plant-focused FOV. CLI flag overrides JSON.
+        bool json_focus_plants = getJsonBoolOr(
+            sampled_params, {"camera", "positioning", "focusing_plants"}, false);
+        bool effective_focus_plant = (args.focus_plant == 1) ||
+                                     (args.focus_plant == -1 && json_focus_plants);
+
+        // Plant-focused FOV: recalculate HFOV to fit all plant primitives' XY bounding box + 5% margin
+        if (effective_focus_plant) {
             float bb_min_x = std::numeric_limits<float>::max();
             float bb_min_y = std::numeric_limits<float>::max();
             float bb_max_x = std::numeric_limits<float>::lowest();
@@ -1470,12 +1501,12 @@ int main(int argc, char *argv[]) {
                 float max_span = std::max(span_x, span_y);
                 float cam_h = camera_setup.camera_position.z;
                 float new_hfov = calculateFOV(max_span, cam_h);
-                std::cout << "[INFO] --focus-plant: plant XY span = " << span_x << " x " << span_y
+                std::cout << "[INFO] focus-plant: plant XY span = " << span_x << " x " << span_y
                           << " m, camera_height = " << cam_h
                           << " m, new HFOV = " << new_hfov << " deg" << std::endl;
                 camera_setup.cam_prop.HFOV = new_hfov;
             } else {
-                std::cout << "[WARN] --focus-plant: could not compute plant bounding box, keeping original FOV" << std::endl;
+                std::cout << "[WARN] focus-plant: could not compute plant bounding box, keeping original FOV" << std::endl;
             }
         }
 
@@ -1559,8 +1590,10 @@ int main(int argc, char *argv[]) {
                 CameraProperties cam_prop = camera_setup.cam_prop;
                 int vis_res_x = std::min(cam_prop.camera_resolution.x, 1920);
                 int vis_res_y = std::min(cam_prop.camera_resolution.y, 1080);
-                // Use standard windowed GLFW mode (headless=false) so OpenGL FBO context initializes properly
-                Visualizer vis(vis_res_x, vis_res_y, 0, true, false);
+                // In interactive GUI mode, create a real window (headless=false).
+                // Otherwise use headless GLFW mode for reliable offscreen rendering on Linux.
+                bool vis_headless = !args.gui;
+                Visualizer vis(vis_res_x, vis_res_y, 0, true, vis_headless);
                 vis.hideWatermark();
                 vis.setLightDirection(sphere2cart(sun_dir));
                 if (sampled_params["environment"]["sun"].value("shadow", true)) {
