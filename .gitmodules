@@ -1,6 +1,6 @@
 [submodule "libs/Helios"]
 	path = libs/Helios
-	url = git@github.com:PlantSimulationLab/Helios.git
+	url = git@github.com:heesup/Helios.git
 [submodule "libs/yaml-cpp"]
 	path = libs/yaml-cpp
 	url = git@github.com:jbeder/yaml-cpp.git
