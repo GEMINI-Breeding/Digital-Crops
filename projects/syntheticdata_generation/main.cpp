@@ -1469,6 +1469,35 @@ int main(int argc, char *argv[]) {
         }
         update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
 
+        // Re-assign unique global primitive instance IDs for "plant", "flower", and "pod" AFTER aging/growth completes!
+        uint final_plant_id = 0;
+        uint final_flower_id = 0;
+        uint final_pod_id = 0;
+
+        for (uint plantID : UUIDs_plants) {
+            std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(plantarchitecture.getAllPlantObjectIDs(plantID));
+            if (!uuids_plant.empty()) {
+                context.setPrimitiveData(uuids_plant, "plant", final_plant_id++);
+            }
+
+            std::vector<uint> flower_objs = plantarchitecture.getPlantFlowerObjectIDs(plantID);
+            for (uint f_obj : flower_objs) {
+                std::vector<uint> uuids_f = context.getObjectPrimitiveUUIDs(f_obj);
+                if (!uuids_f.empty()) {
+                    context.setPrimitiveData(uuids_f, "flower", final_flower_id++);
+                }
+            }
+
+            std::vector<uint> pod_objs = plantarchitecture.getPlantFruitObjectIDs(plantID);
+            for (uint p_obj : pod_objs) {
+                std::vector<uint> uuids_p = context.getObjectPrimitiveUUIDs(p_obj);
+                if (!uuids_p.empty()) {
+                    context.setPrimitiveData(uuids_p, "pod", final_pod_id++);
+                }
+            }
+        }
+        std::cout << "[INFO] Re-labeled primitive instance IDs after aging: " << final_plant_id << " plants, " << final_flower_id << " flowers, " << final_pod_id << " pods." << std::endl;
+
         // Determine whether to apply plant-focused FOV. CLI flag overrides JSON.
         bool json_focus_plants = getJsonBoolOr(
             sampled_params, {"camera", "positioning", "focusing_plants"}, false);
