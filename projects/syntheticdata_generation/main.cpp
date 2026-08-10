@@ -1457,12 +1457,8 @@ int main(int argc, char *argv[]) {
             }
             float dap = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
             if (dap > 0) {
-                //plantarchitecture.advanceTime(plant_IDs_aging, dap);
-                int days_per_update = 2;
-                for(int day = 0; day < dap/days_per_update;day++){
-                    plantarchitecture.advanceTime(plant_IDs_aging, days_per_update);
-                    update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
-                }
+                plantarchitecture.advanceTime(plant_IDs_aging, dap);
+                update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
                 std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << dap
                           << " days" << std::endl;
             }
