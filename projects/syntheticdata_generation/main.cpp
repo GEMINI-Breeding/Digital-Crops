@@ -1465,17 +1465,55 @@ int main(int argc, char *argv[]) {
         }
         update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
 
-        // Re-assign unique global primitive instance IDs for "plant", "flower", and "pod" AFTER aging/growth completes!
-        uint final_plant_id = 0;
+        // Re-assign unique global primitive instance IDs for organ masks AFTER aging/growth completes!
+        // IDs are aligned with the Python OrganNode3D enum:
+        //   0=internode, 1=petiole, 2=leaf, 3=floral_bud, 4=flower, 5=pod
+        uint final_internode_id = 0;
+        uint final_petiole_id = 0;
+        uint final_leaf_id = 0;
+        uint final_floral_bud_id = 0;
         uint final_flower_id = 0;
         uint final_pod_id = 0;
 
         for (uint plantID : UUIDs_plants) {
-            std::vector<uint> uuids_plant = context.getObjectPrimitiveUUIDs(plantarchitecture.getAllPlantObjectIDs(plantID));
-            if (!uuids_plant.empty()) {
-                context.setPrimitiveData(uuids_plant, "plant", final_plant_id++);
+            // Internode / shoot
+            std::vector<uint> internode_objs = plantarchitecture.getAllPlantObjectIDs(plantID);
+            for (uint obj : internode_objs) {
+                std::vector<uint> uuids = context.getObjectPrimitiveUUIDs(obj);
+                if (!uuids.empty()) {
+                    context.setPrimitiveData(uuids, "internode", final_internode_id++);
+                }
             }
 
+            // Petiole
+            std::vector<uint> petiole_objs = plantarchitecture.getPlantPetioleObjectIDs(plantID);
+            for (uint obj : petiole_objs) {
+                std::vector<uint> uuids = context.getObjectPrimitiveUUIDs(obj);
+                if (!uuids.empty()) {
+                    context.setPrimitiveData(uuids, "petiole", final_petiole_id++);
+                }
+            }
+
+            // Leaf
+            std::vector<uint> leaf_objs = plantarchitecture.getPlantLeafObjectIDs(plantID);
+            for (uint obj : leaf_objs) {
+                std::vector<uint> uuids = context.getObjectPrimitiveUUIDs(obj);
+                if (!uuids.empty()) {
+                    context.setPrimitiveData(uuids, "leaf", final_leaf_id++);
+                }
+            }
+
+            // Floral bud (dormant / unexpanded) - use peduncle objects and label by bud state if available
+            std::vector<uint> peduncle_objs = plantarchitecture.getPlantPeduncleObjectIDs(plantID);
+            for (uint obj : peduncle_objs) {
+                std::vector<uint> uuids = context.getObjectPrimitiveUUIDs(obj);
+                if (uuids.empty()) continue;
+                // Determine whether this peduncle supports a flower or is still a dormant bud.
+                // Flowers are already tagged above; any remaining peduncle is treated as floral_bud.
+                context.setPrimitiveData(uuids, "floral_bud", final_floral_bud_id++);
+            }
+
+            // Flower
             std::vector<uint> flower_objs = plantarchitecture.getPlantFlowerObjectIDs(plantID);
             for (uint f_obj : flower_objs) {
                 std::vector<uint> uuids_f = context.getObjectPrimitiveUUIDs(f_obj);
@@ -1484,6 +1522,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            // Pod / fruit
             std::vector<uint> pod_objs = plantarchitecture.getPlantFruitObjectIDs(plantID);
             for (uint p_obj : pod_objs) {
                 std::vector<uint> uuids_p = context.getObjectPrimitiveUUIDs(p_obj);
@@ -1492,7 +1531,13 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        std::cout << "[INFO] Re-labeled primitive instance IDs after aging: " << final_plant_id << " plants, " << final_flower_id << " flowers, " << final_pod_id << " pods." << std::endl;
+        std::cout << "[INFO] Re-labeled primitive instance IDs after aging: "
+                  << final_internode_id << " internodes, "
+                  << final_petiole_id << " petioles, "
+                  << final_leaf_id << " leaves, "
+                  << final_floral_bud_id << " floral buds, "
+                  << final_flower_id << " flowers, "
+                  << final_pod_id << " pods." << std::endl;
 
         // Determine whether to apply plant-focused FOV. CLI flag overrides JSON.
         bool json_focus_plants = getJsonBoolOr(
@@ -1939,12 +1984,17 @@ int main(int argc, char *argv[]) {
     
 
             // Export bounding boxes and segmentation masks in COCO format
-            radiation.writeImageBoundingBoxes(cameralabel, {"plant", "flower", "pod"},
-                                              {0, 1, 2}, output_dir + "/" + filename +"_boxes", cameralabel+"_classes.txt",
+            // Class IDs aligned with Python OrganNode3D enum:
+            //   0=internode, 1=petiole, 2=leaf, 3=floral_bud, 4=flower, 5=pod
+            std::vector<std::string> organ_labels = {"internode", "petiole", "leaf", "floral_bud", "flower", "pod"};
+            std::vector<uint> organ_ids = {0, 1, 2, 3, 4, 5};
+
+            radiation.writeImageBoundingBoxes(cameralabel, organ_labels, organ_ids,
+                                              output_dir + "/" + filename +"_boxes", cameralabel+"_classes.txt",
                                               output_dir + '/');
 
             radiation.writeImageSegmentationMasks(
-                cameralabel, {"plant", "flower", "pod"}, {0, 1, 2},
+                cameralabel, organ_labels, organ_ids,
                 output_dir + '/' + filename + "_masks.json", image_file);
 
             // auto-calibrate camera using colorboard reference values with

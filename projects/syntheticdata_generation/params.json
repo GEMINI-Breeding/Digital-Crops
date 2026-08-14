@@ -180,8 +180,8 @@
         "distribution": {
           "type": "uniform",
           "params": {
-            "min": 1.0,
-            "max": 30.0
+            "min": 30.0,
+            "max": 60.0
           }
         }
       },
