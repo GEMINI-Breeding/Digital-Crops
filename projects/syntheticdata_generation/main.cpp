@@ -1545,12 +1545,17 @@ int main(int argc, char *argv[]) {
         bool effective_focus_plant = (args.focus_plant == 1) ||
                                      (args.focus_plant == -1 && json_focus_plants);
 
-        // Plant-focused FOV: recalculate HFOV to fit all plant primitives' XY bounding box + 5% margin
+        // Plant-focused FOV: recalculate HFOV to fit all plant primitives' FULL 3D
+        // bounding box (X, Y and Z) + 5% margin, projected into camera space.
+        // The old logic only used the XY span, which crops tall plants (e.g. DAP 90)
+        // at near-top-down elevation. This matches the PyTorch compute_focus_plant_camera().
         if (effective_focus_plant) {
             float bb_min_x = std::numeric_limits<float>::max();
             float bb_min_y = std::numeric_limits<float>::max();
+            float bb_min_z = std::numeric_limits<float>::max();
             float bb_max_x = std::numeric_limits<float>::lowest();
             float bb_max_y = std::numeric_limits<float>::lowest();
+            float bb_max_z = std::numeric_limits<float>::lowest();
 
             for (uint plantID : UUIDs_plants) {
                 std::vector<uint> plant_uuids = plantarchitecture.getAllPlantUUIDs(plantID);
@@ -1559,20 +1564,76 @@ int main(int argc, char *argv[]) {
                     for (const auto& v : verts) {
                         bb_min_x = std::min(bb_min_x, v.x);
                         bb_min_y = std::min(bb_min_y, v.y);
+                        bb_min_z = std::min(bb_min_z, v.z);
                         bb_max_x = std::max(bb_max_x, v.x);
                         bb_max_y = std::max(bb_max_y, v.y);
+                        bb_max_z = std::max(bb_max_z, v.z);
                     }
                 }
             }
 
             if (bb_max_x > bb_min_x && bb_max_y > bb_min_y) {
-                float span_x = (bb_max_x - bb_min_x) * 1.05f; // +5% margin
-                float span_y = (bb_max_y - bb_min_y) * 1.05f;
-                float max_span = std::max(span_x, span_y);
-                float cam_h = camera_setup.camera_position.z;
-                float new_hfov = calculateFOV(max_span, cam_h);
-                std::cout << "[INFO] focus-plant: plant XY span = " << span_x << " x " << span_y
-                          << " m, camera_height = " << cam_h
+                // Build camera view basis from position & lookat (same as PyTorch).
+                vec3 eye = camera_setup.camera_position;
+                vec3 target = camera_setup.camera_lookat;
+                vec3 z_axis = normalize(eye - target);
+                vec3 up = make_vec3(0.f, 0.f, 1.f);
+                vec3 x_axis = cross(up, z_axis);
+                if (x_axis.magnitude() < 1e-6f) {
+                    x_axis = make_vec3(1.f, 0.f, 0.f);
+                } else {
+                    x_axis = normalize(x_axis);
+                }
+                vec3 y_axis = cross(z_axis, x_axis);
+
+                auto project_extent = [&](float px, float py, float pz) {
+                    float dx = px - eye.x, dy = py - eye.y, dz = pz - eye.z;
+                    float vx = dx * x_axis.x + dy * x_axis.y + dz * x_axis.z;
+                    float vy = dx * y_axis.x + dy * y_axis.y + dz * y_axis.z;
+                    float vz = dx * z_axis.x + dy * z_axis.y + dz * z_axis.z;
+                    float zneg = std::max(-vz, 1e-4f);
+                    return std::make_pair(vx / zneg, vy / zneg);
+                };
+
+                float min_vx = std::numeric_limits<float>::max();
+                float max_vx = std::numeric_limits<float>::lowest();
+                float min_vy = std::numeric_limits<float>::max();
+                float max_vy = std::numeric_limits<float>::lowest();
+
+                float xs[2] = {bb_min_x, bb_max_x};
+                float ys[2] = {bb_min_y, bb_max_y};
+                float zs[2] = {bb_min_z, bb_max_z};
+                for (int ix = 0; ix < 2; ix++) {
+                    for (int iy = 0; iy < 2; iy++) {
+                        for (int iz = 0; iz < 2; iz++) {
+                            auto pr = project_extent(xs[ix], ys[iy], zs[iz]);
+                            min_vx = std::min(min_vx, pr.first);
+                            max_vx = std::max(max_vx, pr.first);
+                            min_vy = std::min(min_vy, pr.second);
+                            max_vy = std::max(max_vy, pr.second);
+                        }
+                    }
+                }
+
+                float ext_x = (max_vx - min_vx) * 1.05f; // +5% margin
+                float ext_y = (max_vy - min_vy) * 1.05f;
+                ext_x = std::max(ext_x, 1e-4f);
+                ext_y = std::max(ext_y, 1e-4f);
+
+                float hfov_rad = 2.0f * atanf(0.5f * ext_x);
+                float vfov_rad = 2.0f * atanf(0.5f * ext_y);
+
+                // Fit the larger vertical extent by widening HFOV (square-ish image).
+                float aspect = camera_setup.cam_prop.camera_resolution.x /
+                               (float)std::max(camera_setup.cam_prop.camera_resolution.y, 1);
+                if (vfov_rad > hfov_rad * aspect) {
+                    hfov_rad = vfov_rad / aspect;
+                }
+                float new_hfov = rad2deg(hfov_rad);
+
+                std::cout << "[INFO] focus-plant: plant 3D bbox span x=" << (bb_max_x - bb_min_x)
+                          << " y=" << (bb_max_y - bb_min_y) << " z=" << (bb_max_z - bb_min_z)
+                          << " m, camera_height = " << camera_setup.camera_position.z
                           << " m, new HFOV = " << new_hfov << " deg" << std::endl;
                 camera_setup.cam_prop.HFOV = new_hfov;
             } else {
