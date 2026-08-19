@@ -251,8 +251,8 @@
         "distribution": {
           "type": "uniform",
           "params": {
-            "min": 15,
-            "max": 20
+            "min": 0.0,
+            "max": 0.0
           }
         }
       }
@@ -396,7 +396,9 @@
                 "max": -0.2
               }
             }
-          }
+          },
+          "wave_period": 0.0,
+          "wave_amplitude": 0.0
         },
         "petiole": {
           "pitch": {

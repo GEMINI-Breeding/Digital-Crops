@@ -171,8 +171,10 @@ std::vector<uint> make_field(helios::Context& context, const json& params) {
     vec3 plot_extent = make_vec3(getJsonNumberOr<float>(plot_shape, {"plot_size_x"}, 1.299f), \
                     getJsonNumberOr<float>(plot_shape, {"plot_size_y"}, 3.831f), getJsonNumberOr<float>(plot_shape, {"plot_size_z"}, 0.0f));
     
-    // Set margin factor to 1.00 to perfectly match exact plot dimensions without excess overlapping
-    float margin_factor = 1.05f; // 
+    // Set margin factor to comfortably cover camera FOV for single-plant / single-plot scenes (prevent black margins)
+    float default_margin = (n_beds <= 1 && n_rows <= 1) ? 3.5f : 1.05f;
+    float margin_factor = getJsonNumberOr<float>(plot_shape, {"margin_factor"},
+                          getJsonNumberOr<float>(params, {"environment", "soil", "margin_factor"}, default_margin));
     vec3 ground_extent = make_vec3(plot_extent.x * margin_factor, plot_extent.y * margin_factor, plot_extent.z);
     
     std::cout << "[DEBUG] Rescaling to extent: (" << ground_extent.x << ", " << ground_extent.y << ", " << ground_extent.z << ")" << std::endl;

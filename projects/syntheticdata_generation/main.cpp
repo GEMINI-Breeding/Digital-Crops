@@ -137,6 +137,9 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
     float midrib_fold = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "midrib_fold_fraction"}, -1.0f);
     float long_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "longitudinal_curvature"}, -999.0f);
     float lat_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "lateral_curvature"}, -999.0f);
+    float wave_period = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "wave_period"}, -1.0f);
+    float wave_amplitude = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "wave_amplitude"}, -1.0f);
+    float leaf_subdivisions = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "subdivisions"}, -1.0f);
 
     // --- Phytomer: Petiole Parameters ---
     float petiole_pitch = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "pitch"}, -999.0f);
@@ -210,6 +213,9 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
         if (midrib_fold >= 0.0f) sp.phytomer_parameters.leaf.prototype.midrib_fold_fraction = midrib_fold;
         if (long_curvature > -900.0f) sp.phytomer_parameters.leaf.prototype.longitudinal_curvature = long_curvature;
         if (lat_curvature > -900.0f) sp.phytomer_parameters.leaf.prototype.lateral_curvature = lat_curvature;
+        if (wave_period >= 0.0f) sp.phytomer_parameters.leaf.prototype.wave_period = wave_period;
+        if (wave_amplitude >= 0.0f) sp.phytomer_parameters.leaf.prototype.wave_amplitude = wave_amplitude;
+        if (leaf_subdivisions > 0.0f) sp.phytomer_parameters.leaf.prototype.subdivisions = static_cast<uint>(leaf_subdivisions);
 
         // Phytomer: Petiole
         if (petiole_pitch > -900.0f) sp.phytomer_parameters.petiole.pitch = petiole_pitch;
@@ -426,8 +432,8 @@ void update_leafoptics(Context &context,
                         LeafOptics& leafoptics,
                         json sampled_params) {
     
-    // Extract leaf specular exponent from JSON with default value
-    float leaf_specular = sampled_params["plant_properties"]["leaf_optics"].value("specular_exponent", 2.0f);
+    // Extract leaf specular exponent from JSON with default value (0.0 for diffuse realistic foliage)
+    float leaf_specular = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "specular_exponent"}, 0.0f);
     
     // Get plantarchitecture plant ids
     std::vector<uint> plant_ids = plantarchitecture.getAllPlantIDs();
@@ -1281,10 +1287,13 @@ int main(int argc, char *argv[]) {
             
             // load dirt texture with fixed size (original method)
             // Therefore the camera height will be the dominant paramter that makes the camera perelex effect
+            int n_beds_val = getJsonNumberOr<int>(sampled_params, {"field", "num_beds"}, 1);
+            int n_rows_val = getJsonNumberOr<int>(sampled_params, {"field", "num_rows"}, 1);
+            float ground_margin = (n_beds_val <= 1 && n_rows_val <= 1) ? 3.5f : 1.05f;
             float ground_x = getJsonNumberOr<float>(
-                sampled_params, {"field", "layout", "plot_size_x"}, 1.299f) * 1.05f; // 5 percent buffer
+                sampled_params, {"field", "layout", "plot_size_x"}, 1.299f) * ground_margin;
             float ground_y = getJsonNumberOr<float>(
-                sampled_params, {"field", "layout", "plot_size_y"}, 3.831f) * 1.05f; // 5 percent buffer
+                sampled_params, {"field", "layout", "plot_size_y"}, 3.831f) * ground_margin;
             //float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 2; // 200 percent buffer
             //float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 2; // 200 percent buffer
 
