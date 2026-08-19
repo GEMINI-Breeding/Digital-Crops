@@ -3,7 +3,7 @@
   "metadata": {
     "year": 2025,
     "location": "Davis",
-    "plant_type": "cowpea",
+    "plant_type": "tomato",
     "dap": {
       "distribution": {
         "type": "uniform",
@@ -12,7 +12,8 @@
           "max": 90
         }
       }
-    }
+    },
+    "genotype": "bush"
   },
   "environment": {
     "soil": {

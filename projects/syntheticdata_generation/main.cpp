@@ -60,46 +60,180 @@ std::string getJsonStringOr(const json& root,
                            const std::string& default_value);
 
 void init_plant_architecture(PlantArchitecture& plantarchitecture,
-                             json sampled_params) {
+                             json& sampled_params,
+                             const CommandLineOptions& args) {
 
-    // Load plant from Helios Library
-    plantarchitecture.loadPlantModelFromLibrary(getJsonStringOr(sampled_params, {"metadata", "plant_type"}, "cowpea"));
+    // 1. Determine effective plant model / species
+    std::string plant_type = "cowpea";
+    if (!args.plant_type.empty()) {
+        plant_type = args.plant_type;
+    } else {
+        plant_type = getJsonStringOr(sampled_params, {"metadata", "plant_type"}, "cowpea");
+    }
+    // Transform to lowercase
+    std::transform(plant_type.begin(), plant_type.end(), plant_type.begin(), ::tolower);
+    sampled_params["metadata"]["plant_type"] = plant_type;
 
+    // Validate against registered Helios library models
+    std::vector<std::string> available_models = plantarchitecture.getAvailablePlantModels();
+    bool model_found = false;
+    for (const auto& m : available_models) {
+        if (m == plant_type) {
+            model_found = true;
+            break;
+        }
+    }
+    if (!model_found) {
+        std::cerr << "[WARNING] Plant model '" << plant_type << "' not found in Helios library! Defaulting to 'cowpea'." << std::endl;
+        plant_type = "cowpea";
+        sampled_params["metadata"]["plant_type"] = "cowpea";
+    }
+
+    // Load plant model from Helios library
+    plantarchitecture.loadPlantModelFromLibrary(plant_type);
     plantarchitecture.disableMessages();
-    // Get the shoot parameters
-    std::map<std::string, ShootParameters> shoot_params =
-        plantarchitecture.getCurrentShootParameters();
 
-    // update leaf pitch and peduncle length
-    const float leaf_pitch = getJsonNumberOr<float>(
-        sampled_params,
-        {"plant_properties", "architecture", "phytomer_parameters", "leaf_pitch"},
-        0.0f);
-    const float flower_bud_break_probability = getJsonNumberOr<float>(
-        sampled_params,
-        {"plant_properties", "architecture", "flower_bud_break_probability"},
-        0.4f);
+    // 2. Determine effective genotype archetype
+    std::string genotype = "random";
+    if (!args.genotype.empty()) {
+        genotype = args.genotype;
+    } else {
+        genotype = getJsonStringOr(sampled_params, {"metadata", "genotype"}, "random");
+    }
+    std::transform(genotype.begin(), genotype.end(), genotype.begin(), ::tolower);
+    sampled_params["metadata"]["genotype"] = genotype;
 
-    shoot_params.at("trifoliate").phytomer_parameters.leaf.pitch = leaf_pitch;
-    shoot_params.at("trifoliate").flower_bud_break_probability =
-        flower_bud_break_probability;
+    // Get current shoot parameters map
+    std::map<std::string, ShootParameters> shoot_params_map = plantarchitecture.getCurrentShootParameters();
 
+    // 3. Parse Shoot & Phytomer Architectural parameters from JSON
+    json arch_json;
+    if (sampled_params.contains("plant_properties") && sampled_params["plant_properties"].contains("architecture")) {
+        arch_json = sampled_params["plant_properties"]["architecture"];
+    }
 
-    // update leaf (comment out  below to render faster)
-#if 0
-    shoot_params.at("trifoliate")
-        .phytomer_parameters.leaf.prototype.prototype_function =
-        CowpeaLeafPrototype_trifoliate_OBJ;
-#endif
+    // --- Shoot Level Parameters ---
+    float flower_bud_break_prob = getJsonNumberOr<float>(arch_json, {"shoot", "flower_bud_break_probability"}, 
+                                  getJsonNumberOr<float>(arch_json, {"flower_bud_break_probability"}, -1.0f));
+    float veg_bud_break_prob = getJsonNumberOr<float>(arch_json, {"shoot", "vegetative_bud_break_probability"},
+                               getJsonNumberOr<float>(arch_json, {"vegetative_bud_break_probability"}, -1.0f));
+    float fruit_set_prob = getJsonNumberOr<float>(arch_json, {"shoot", "fruit_set_probability"}, -1.0f);
+    float internode_len_max = getJsonNumberOr<float>(arch_json, {"shoot", "internode_length_max"}, -1.0f);
+    float internode_len_mult = getJsonNumberOr<float>(arch_json, {"shoot", "internode_length_multiplier"}, 1.0f);
+    float elongation_rate = getJsonNumberOr<float>(arch_json, {"shoot", "elongation_rate_max"}, -1.0f);
+    float gravitropic_curv = getJsonNumberOr<float>(arch_json, {"shoot", "gravitropic_curvature"}, -99999.0f);
+    float tortuosity_val = getJsonNumberOr<float>(arch_json, {"shoot", "tortuosity"}, -1.0f);
+    float insertion_angle = getJsonNumberOr<float>(arch_json, {"shoot", "insertion_angle_tip"}, -1.0f);
 
-    // apply updated parameters
-    plantarchitecture.updateCurrentShootParameters(
-        "trifoliate", shoot_params.at("trifoliate"));
+    // --- Phytomer: Leaf Parameters ---
+    float leaf_pitch = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "pitch"},
+                       getJsonNumberOr<float>(arch_json, {"phytomer_parameters", "leaf_pitch"},
+                       getJsonNumberOr<float>(arch_json, {"leaf_pitch"}, -999.0f)));
+    float leaf_yaw = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "yaw"}, -999.0f);
+    float leaf_roll = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "roll"}, -999.0f);
+    float leaf_scale_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "scale_multiplier"}, 1.0f);
+    float leaf_proto_scale = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "prototype_scale"}, -1.0f);
+    float leaf_aspect_ratio = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "aspect_ratio"}, -1.0f);
+    float midrib_fold = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "midrib_fold_fraction"}, -1.0f);
+    float long_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "longitudinal_curvature"}, -999.0f);
+    float lat_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "leaf", "lateral_curvature"}, -999.0f);
+
+    // --- Phytomer: Petiole Parameters ---
+    float petiole_pitch = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "pitch"}, -999.0f);
+    float petiole_len_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "length_multiplier"}, 1.0f);
+    float petiole_rad_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "radius_multiplier"}, 1.0f);
+    float petiole_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "curvature"}, -99999.0f);
+
+    // --- Phytomer: Internode Parameters ---
+    float internode_pitch = getJsonNumberOr<float>(arch_json, {"phytomer", "internode", "pitch"}, -999.0f);
+    float internode_rad_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "internode", "radius_multiplier"}, 1.0f);
+    float phyllotactic_ang = getJsonNumberOr<float>(arch_json, {"phytomer", "internode", "phyllotactic_angle"}, -999.0f);
+
+    // --- Phytomer: Inflorescence / Fruit Parameters ---
+    float fruit_scale_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "inflorescence", "fruit_scale_multiplier"}, 1.0f);
+    float fruit_proto_scale = getJsonNumberOr<float>(arch_json, {"phytomer", "inflorescence", "fruit_prototype_scale"}, -1.0f);
+    float fruit_gravity_frac = getJsonNumberOr<float>(arch_json, {"phytomer", "inflorescence", "fruit_gravity_factor_fraction"}, -1.0f);
+
+    // --- Apply Genotype Archetype Overrides (species-aware) ---
+    if (plant_type == "sorghum") {
+        if (genotype == "tall") {
+            if (internode_len_max < 0) internode_len_max = 0.28f;
+        } else if (genotype == "dwarf") {
+            if (internode_len_max < 0) internode_len_max = 0.16f;
+        }
+    } else {
+        if (genotype == "bush" || genotype == "erect") {
+            if (internode_len_max < 0) internode_len_max = 0.09f;
+            if (leaf_pitch < -900) leaf_pitch = 45.0f;
+            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.5f;
+            if (gravitropic_curv < -90000) gravitropic_curv = -200.0f;
+        } else if (genotype == "spreading") {
+            if (internode_len_max < 0) internode_len_max = 0.14f;
+            if (leaf_pitch < -900) leaf_pitch = 15.0f;
+            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.6f;
+            if (gravitropic_curv < -90000) gravitropic_curv = -600.0f;
+        } else if (genotype == "vine" || genotype == "climbing") {
+            if (internode_len_max < 0) internode_len_max = 0.22f;
+            if (leaf_pitch < -900) leaf_pitch = 20.0f;
+            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.25f;
+            if (gravitropic_curv < -90000) gravitropic_curv = -900.0f;
+            if (tortuosity_val < 0) tortuosity_val = 8.0f;
+        }
+    }
+
+    // 4. Update Shoot & Phytomer Parameters across all shoot types
+    for (auto& pair : shoot_params_map) {
+        const std::string& shoot_label = pair.first;
+        ShootParameters& sp = pair.second;
+
+        // Shoot-level
+        if (flower_bud_break_prob >= 0.0f) sp.flower_bud_break_probability = flower_bud_break_prob;
+        if (veg_bud_break_prob >= 0.0f) {
+            sp.vegetative_bud_break_probability_min = veg_bud_break_prob;
+            sp.vegetative_bud_break_probability_max = veg_bud_break_prob;
+        }
+        if (fruit_set_prob >= 0.0f) sp.fruit_set_probability = fruit_set_prob;
+        if (internode_len_max > 0.0f) sp.internode_length_max = internode_len_max;
+        else if (internode_len_mult != 1.0f) sp.internode_length_max = sp.internode_length_max.val() * internode_len_mult;
+        if (elongation_rate > 0.0f) sp.elongation_rate_max = elongation_rate;
+        if (gravitropic_curv > -90000.0f) sp.gravitropic_curvature = gravitropic_curv;
+        if (tortuosity_val >= 0.0f) sp.tortuosity = tortuosity_val;
+        if (insertion_angle >= 0.0f) sp.insertion_angle_tip = insertion_angle;
+
+        // Phytomer: Leaf
+        if (leaf_pitch > -900.0f) sp.phytomer_parameters.leaf.pitch = leaf_pitch;
+        if (leaf_yaw > -900.0f) sp.phytomer_parameters.leaf.yaw = leaf_yaw;
+        if (leaf_roll > -900.0f) sp.phytomer_parameters.leaf.roll = leaf_roll;
+        if (leaf_proto_scale > 0.0f) sp.phytomer_parameters.leaf.prototype_scale = leaf_proto_scale;
+        else if (leaf_scale_mult != 1.0f) sp.phytomer_parameters.leaf.prototype_scale = sp.phytomer_parameters.leaf.prototype_scale.val() * leaf_scale_mult;
+        if (leaf_aspect_ratio > 0.0f) sp.phytomer_parameters.leaf.prototype.leaf_aspect_ratio = leaf_aspect_ratio;
+        if (midrib_fold >= 0.0f) sp.phytomer_parameters.leaf.prototype.midrib_fold_fraction = midrib_fold;
+        if (long_curvature > -900.0f) sp.phytomer_parameters.leaf.prototype.longitudinal_curvature = long_curvature;
+        if (lat_curvature > -900.0f) sp.phytomer_parameters.leaf.prototype.lateral_curvature = lat_curvature;
+
+        // Phytomer: Petiole
+        if (petiole_pitch > -900.0f) sp.phytomer_parameters.petiole.pitch = petiole_pitch;
+        if (petiole_len_mult != 1.0f) sp.phytomer_parameters.petiole.length = sp.phytomer_parameters.petiole.length.val() * petiole_len_mult;
+        if (petiole_rad_mult != 1.0f) sp.phytomer_parameters.petiole.radius = sp.phytomer_parameters.petiole.radius.val() * petiole_rad_mult;
+        if (petiole_curvature > -90000.0f) sp.phytomer_parameters.petiole.curvature = petiole_curvature;
+
+        // Phytomer: Internode
+        if (internode_pitch > -900.0f) sp.phytomer_parameters.internode.pitch = internode_pitch;
+        if (internode_rad_mult != 1.0f) sp.phytomer_parameters.internode.radius_initial = sp.phytomer_parameters.internode.radius_initial.val() * internode_rad_mult;
+        if (phyllotactic_ang > -900.0f) sp.phytomer_parameters.internode.phyllotactic_angle = phyllotactic_ang;
+
+        // Phytomer: Inflorescence / Fruit
+        if (fruit_proto_scale > 0.0f) sp.phytomer_parameters.inflorescence.fruit_prototype_scale = fruit_proto_scale;
+        else if (fruit_scale_mult != 1.0f) sp.phytomer_parameters.inflorescence.fruit_prototype_scale = sp.phytomer_parameters.inflorescence.fruit_prototype_scale.val() * fruit_scale_mult;
+        if (fruit_gravity_frac >= 0.0f) sp.phytomer_parameters.inflorescence.fruit_gravity_factor_fraction = fruit_gravity_frac;
+
+        // Save back to plantarchitecture
+        plantarchitecture.updateCurrentShootParameters(shoot_label, sp);
+    }
 
     // enable object data output for flower state identification
     plantarchitecture.optionalOutputObjectData("closedflowerID");
     plantarchitecture.optionalOutputObjectData("openflowerID");
-
 }
 
 CameraSetup init_camera(Context& context, PlantArchitecture &plantarchitecture, json& sampled_params) {
@@ -556,41 +690,6 @@ inline GenerationMode parseGenerationMode(const std::string &mode_str) {
     }
 }
 
-// Command line options structure
-enum class Renderer {
-    NONE,       // Do not render any image
-    VIS,        // OpenGL visualizer image only
-    RADIATION,  // Radiation model camera image only
-    ALL         // Both visualizer and radiation model images
-};
-
-struct CommandLineOptions {
-    bool rotation_view = false;
-    bool grow = false;
-    bool debug = false;
-    bool save_xml = true;       // Save plant structure XML files
-    bool stats_only = false;
-    bool gui = false;
-    Renderer renderer = Renderer::ALL; // Default: render both visualizer and radiation images
-    bool calibrate_color = false; // Add color calibration panel and run auto-calibration
-    bool dry_run = false; // Load and validate JSON without running generation
-    bool run_multispectral = false; // Generate multispectral (NIR) image
-    bool run_temperature = false; // Generate temperature (LW) image
-    bool run_depth = false; // Generate depth map image
-    bool run_wue = false; // Generate Water-Use Efficiency (WUE) image
-    int focus_plant = -1; // -1 = use JSON, 0 = disable, 1 = enable auto-fit FOV to plant bounding box + 5% margin
-    float height = 0.0f;  // Default empty value 
-    float fov = -1.0f; // -1 means "not set" (use auto-calculated value)
-    int dap = -1; // -1 means "not set" (use value from JSON)
-    unsigned int seed = 0;
-    int num_iterations = 1;
-    std::string tile_file;
-    std::string output_dir;
-    std::string output_name;
-    std::string params_file;
-};
-
-
 // Function to parse command line arguments
 CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
     CommandLineOptions options;
@@ -637,6 +736,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
                       << "Options:\n"
                       << "  --renderer MODE          Output renderer: vis, radiation, all (default), or none\n"
+                      << "  --plant-type, --species TYPE Set plant model (cowpea, bean, sorghum, soybean, maize, etc.)\n"
+                      << "  --genotype ARCHETYPE     Set genotype archetype (bush, spreading, vine, dwarf, tall, random)\n"
                       << "  --save-xml               Save plant structure XML files (default: true)\n"
                       << "  --no-save-xml            Skip saving XML files\n"
                       << "  -r, --rotation           Enable rotation view\n"
@@ -699,6 +800,10 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 std::string wue_flag = argv[++i];
                 if (wue_flag == "false" || wue_flag == "0") options.run_wue = false;
                 else if (wue_flag == "true" || wue_flag == "1") options.run_wue = true;
+            } else if (arg == "--plant-type" || arg == "--species") {
+                options.plant_type = argv[++i];
+            } else if (arg == "--genotype") {
+                options.genotype = argv[++i];
             } else if (arg == "-h" || arg == "--height") {
                 options.height = std::stof(argv[++i]);
             } else if (arg == "-t" || arg == "--tile") {
@@ -799,12 +904,32 @@ int main(int argc, char *argv[]) {
     // Parse command-line arguments using dedicated function
     CommandLineOptions args = parseCommandLineArgs(argc, argv);
 
-    // load parameters first to check for seed in JSON
+    // Auto-resolve params file: command line override -> configs/params_<species>.json -> ../params.json
     std::string params_file;
     if (args.params_file.size() > 0) {
         params_file = args.params_file;
     } else {
-        params_file = "../params.json";
+        std::string req_species = !args.plant_type.empty() ? args.plant_type : "cowpea";
+        std::transform(req_species.begin(), req_species.end(), req_species.begin(), ::tolower);
+        
+        std::vector<std::string> candidates = {
+            "configs/params_" + req_species + ".json",
+            "../configs/params_" + req_species + ".json",
+            "../../configs/params_" + req_species + ".json",
+            "params_" + req_species + ".json",
+            "../params_" + req_species + ".json",
+            "../params.json",
+            "params.json"
+        };
+        for (const auto& cand : candidates) {
+            if (fs::exists(cand)) {
+                params_file = cand;
+                break;
+            }
+        }
+        if (params_file.empty()) {
+            params_file = "../params.json";
+        }
     }
     std::cout << "Loading " << params_file << std::endl;
     json json_params = loadParametersFromJson(params_file);
@@ -830,21 +955,31 @@ int main(int argc, char *argv[]) {
     // Set up random number generator with final seed
     std::mt19937 rng(final_seed);
 
-    // prepare output dir
-    std::string output_dir;
+    // prepare base output dir
+    std::string base_output_dir;
     if (args.output_dir.size() > 0) {
-        output_dir = args.output_dir;
+        base_output_dir = args.output_dir;
     } else {
-        output_dir = json_params.value("output_directory", "output");
+        base_output_dir = json_params.value("output_directory", "output");
     }
+    // Determine effective plant_type for subfolder routing
+    std::string eff_plant_type = !args.plant_type.empty() ? args.plant_type : getJsonStringOr(json_params, {"metadata", "plant_type"}, "cowpea");
+    std::transform(eff_plant_type.begin(), eff_plant_type.end(), eff_plant_type.begin(), ::tolower);
+    
+    std::string output_dir = base_output_dir;
+    fs::path base_path(base_output_dir);
+    if (base_path.filename().string() != eff_plant_type) {
+        output_dir = (base_path / eff_plant_type).string();
+    }
+
     // Create output dir
     if (!fs::exists(output_dir)) {
         fs::create_directories(output_dir);
     }
-    std::cout << "Output directory: " << output_dir << std::endl;
+    std::cout << "Output directory: " << output_dir << " (Plant model: " << eff_plant_type << ")" << std::endl;
 
     // Get output name
-    std::string output_name = args.output_name.size() > 0 ? args.output_name : "plot";
+    std::string output_name = args.output_name.size() > 0 ? args.output_name : eff_plant_type;
 
     if (g_debug_mode) {
         // Save the original parameters once (shared across all crops)
@@ -1238,7 +1373,7 @@ int main(int argc, char *argv[]) {
             // Auto plot generation - Earl
             // In auto mode, use auto config to geneate plots and remove the config
             // If double row plant thing in auto mode, it will double the nuber of plants?
-            init_plant_architecture(plantarchitecture, sampled_params);
+            init_plant_architecture(plantarchitecture, sampled_params, args);
             auto auto_planting_cfg = sampled_params["field"]["layout"]["sampling"];
             // Calculate grid positioning to center all plots
             int num_beds = auto_planting_cfg["num_beds"].get<int>();
@@ -1332,7 +1467,7 @@ int main(int argc, char *argv[]) {
 
             // params.json only have single plant type within plot for now
             // Get crop type and convert to lowercase for plant library
-            init_plant_architecture(plantarchitecture, sampled_params);
+            init_plant_architecture(plantarchitecture, sampled_params, args);
             auto plots = sampled_params["field"]["plots"];
             int num_plots = plots.size();
             uint global_plant_id = 0;
@@ -1575,7 +1710,15 @@ int main(int argc, char *argv[]) {
             }
 
             if (bb_max_x > bb_min_x && bb_max_y > bb_min_y) {
-                // Build camera view basis from position & lookat (same as PyTorch).
+                // 1. Center camera on plant's exact 3D center so plant is perfectly framed
+                vec3 plant_center = make_vec3(0.5f * (bb_min_x + bb_max_x),
+                                              0.5f * (bb_min_y + bb_max_y),
+                                              0.5f * (bb_min_z + bb_max_z));
+                vec3 cam_offset = camera_setup.camera_position - camera_setup.camera_lookat;
+                camera_setup.camera_lookat = plant_center;
+                camera_setup.camera_position = plant_center + cam_offset;
+
+                // 2. Build camera view basis from position & lookat
                 vec3 eye = camera_setup.camera_position;
                 vec3 target = camera_setup.camera_lookat;
                 vec3 z_axis = normalize(eye - target);
@@ -1617,13 +1760,14 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                float ext_x = (max_vx - min_vx) * 1.05f; // +5% margin
-                float ext_y = (max_vy - min_vy) * 1.05f;
-                ext_x = std::max(ext_x, 1e-4f);
-                ext_y = std::max(ext_y, 1e-4f);
+                // 3. Compute symmetric half-extent from optical center with +20% margin to guarantee no clipping
+                float half_ext_x = std::max(std::abs(min_vx), std::abs(max_vx)) * 1.20f;
+                float half_ext_y = std::max(std::abs(min_vy), std::abs(max_vy)) * 1.20f;
+                half_ext_x = std::max(half_ext_x, 1e-4f);
+                half_ext_y = std::max(half_ext_y, 1e-4f);
 
-                float hfov_rad = 2.0f * atanf(0.5f * ext_x);
-                float vfov_rad = 2.0f * atanf(0.5f * ext_y);
+                float hfov_rad = 2.0f * atanf(half_ext_x);
+                float vfov_rad = 2.0f * atanf(half_ext_y);
 
                 // Fit the larger vertical extent by widening HFOV (square-ish image).
                 float aspect = camera_setup.cam_prop.camera_resolution.x /
@@ -1635,8 +1779,8 @@ int main(int argc, char *argv[]) {
 
                 std::cout << "[INFO] focus-plant: plant 3D bbox span x=" << (bb_max_x - bb_min_x)
                           << " y=" << (bb_max_y - bb_min_y) << " z=" << (bb_max_z - bb_min_z)
-                          << " m, camera_height = " << camera_setup.camera_position.z
-                          << " m, new HFOV = " << new_hfov << " deg" << std::endl;
+                          << " m, centered at (" << plant_center.x << ", " << plant_center.y << ", " << plant_center.z
+                          << "), new HFOV = " << new_hfov << " deg" << std::endl;
                 camera_setup.cam_prop.HFOV = new_hfov;
             } else {
                 std::cout << "[WARN] focus-plant: could not compute plant bounding box, keeping original FOV" << std::endl;

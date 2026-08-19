@@ -12,7 +12,8 @@
           "max": 90
         }
       }
-    }
+    },
+    "genotype": "bush"
   },
   "environment": {
     "soil": {
