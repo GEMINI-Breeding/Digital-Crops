@@ -1476,8 +1476,10 @@ int main(int argc, char *argv[]) {
         uint final_pod_id = 0;
 
         for (uint plantID : UUIDs_plants) {
-            // Internode / shoot
-            std::vector<uint> internode_objs = plantarchitecture.getAllPlantObjectIDs(plantID);
+            // Internode / shoot (use the internode getter, NOT getAllPlantObjectIDs,
+            // which returns every organ including leaves/petioles/flowers/pods and
+            // would cause the internode mask to swallow the whole plant)
+            std::vector<uint> internode_objs = plantarchitecture.getPlantInternodeObjectIDs(plantID);
             for (uint obj : internode_objs) {
                 std::vector<uint> uuids = context.getObjectPrimitiveUUIDs(obj);
                 if (!uuids.empty()) {
