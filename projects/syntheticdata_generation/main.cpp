@@ -829,6 +829,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.num_iterations = std::max(std::atoi(argv[++i]), 0);
             } else if (arg == "-f" || arg == "--file") {
                 options.params_file = argv[++i];
+            } else if (arg == "--input-xml" || arg == "--xml") {
+                options.input_xml = argv[++i];
             } else {
                 std::printf("Unknown argument: %s\n", arg.c_str());
                 std::printf("Use --help for usage information\n");
@@ -1491,6 +1493,9 @@ int main(int argc, char *argv[]) {
                 for (int plant_j = 0; plant_j < num_plants; plant_j++) {
                     // Select the specific crop
                     json selected_crop = plants[plant_j];
+                    if (!args.input_xml.empty()) {
+                        selected_crop["xml"] = args.input_xml;
+                    }
                     
                     // plant count and age can be changed here
                     vec3 origin(0, 0, 0);

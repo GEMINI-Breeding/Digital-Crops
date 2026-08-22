@@ -54,6 +54,7 @@ struct CommandLineOptions {
     std::string params_file;
     std::string plant_type; // Override plant_type from CLI (e.g. cowpea, bean, sorghum, soybean, maize)
     std::string genotype;   // Override genotype archetype (e.g. bush, spreading, vine, dwarf, tall, random)
+    std::string input_xml;  // Optional plant XML file to load and render
 };
 
 // Debug print macro - expands __FILE__ and __LINE__ at call site
