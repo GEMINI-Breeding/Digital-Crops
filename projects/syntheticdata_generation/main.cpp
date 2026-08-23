@@ -2206,9 +2206,9 @@ int main(int argc, char *argv[]) {
 
             // Export bounding boxes and segmentation masks in COCO format
             // Class IDs aligned with Python OrganNode3D enum:
-            //   0=internode, 1=petiole, 2=leaf, 3=floral_bud, 4=flower, 5=pod
-            std::vector<std::string> organ_labels = {"internode", "petiole", "leaf", "floral_bud", "flower", "pod"};
-            std::vector<uint> organ_ids = {0, 1, 2, 3, 4, 5};
+            //   0=internode (shoot in PlantArchitecture), 1=petiole, 2=leaf, 3=floral_bud, 4=flower, 5=pod
+            std::vector<std::string> organ_labels = {"shoot", "internode", "petiole", "leaf", "floral_bud", "flower", "pod"};
+            std::vector<uint> organ_ids = {0, 0, 1, 2, 3, 4, 5};
 
             radiation.writeImageBoundingBoxes(cameralabel, organ_labels, organ_ids,
                                               output_dir + "/" + filename +"_boxes", cameralabel+"_classes.txt",
