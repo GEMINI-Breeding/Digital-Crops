@@ -665,16 +665,15 @@ void init_spectral_data(Context &context,
     // Initialize leaf optics properties with fitted parameters
     LeafOpticsProperties leafopticsprops;
     leafoptics.getPropertiesFromLibrary("prospect", leafopticsprops);
-    auto leaf_opt = sampled_params["plant_properties"]["leaf_optics"];
-    leafopticsprops.numberlayers = leaf_opt.value("number_layers", 1.5824);
-    leafopticsprops.chlorophyllcontent = leaf_opt.value("chlorophyll_content", 37.4129);
-    leafopticsprops.carotenoidcontent = leaf_opt.value("carotenoid_content", 12.2658);
-    leafopticsprops.anthocyancontent = leaf_opt.value("anthocyan_content", 0.958622);
-    leafopticsprops.brownpigments = leaf_opt.value("brown_pigments", 0.01339);
-    leafopticsprops.watermass = leaf_opt.value("water_mass", 0.01346);
-    leafopticsprops.drymass = leaf_opt.value("dry_mass", 0.00315556);
-    leafopticsprops.protein = leaf_opt.value("protein", 0.0);
-    leafopticsprops.carbonconstituents = leaf_opt.value("carbon_constituents", 0.0);
+    leafopticsprops.numberlayers = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "number_layers"}, 1.5824f);
+    leafopticsprops.chlorophyllcontent = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "chlorophyll_content"}, 37.4129f);
+    leafopticsprops.carotenoidcontent = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "carotenoid_content"}, 12.2658f);
+    leafopticsprops.anthocyancontent = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "anthocyan_content"}, 0.958622f);
+    leafopticsprops.brownpigments = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "brown_pigments"}, 0.01339f);
+    leafopticsprops.watermass = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "water_mass"}, 0.01346f);
+    leafopticsprops.drymass = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "dry_mass"}, 0.00315556f);
+    leafopticsprops.protein = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "protein"}, 0.0f);
+    leafopticsprops.carbonconstituents = getJsonNumberOr<float>(sampled_params, {"plant_properties", "leaf_optics", "carbon_constituents"}, 0.0f);
 
     // Run cowpea model to generate leaf_reflectivity_prospect and leaf_transmissivity_prospect
     leafoptics.run(leafopticsprops, "prospect");
@@ -734,6 +733,38 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 }
             } else {
                 options.focus_plant = 1;
+            }
+        } else if (arg == "--ground-occlusion") {
+            if (i + 1 < argc) {
+                std::string occ_flag = argv[i + 1];
+                if (occ_flag == "false" || occ_flag == "0") {
+                    options.ground_occlusion = 0;
+                    ++i;
+                } else if (occ_flag == "true" || occ_flag == "1") {
+                    options.ground_occlusion = 1;
+                    ++i;
+                } else {
+                    options.ground_occlusion = 0;
+                }
+            } else {
+                options.ground_occlusion = 0;
+            }
+        } else if (arg == "--no-ground" || arg == "--no-ground-occlusion") {
+            options.ground_occlusion = 0;
+        } else if (arg == "--ground-clipping") {
+            if (i + 1 < argc) {
+                std::string clip_flag = argv[i + 1];
+                if (clip_flag == "false" || clip_flag == "0") {
+                    options.ground_clipping = 0;
+                    ++i;
+                } else if (clip_flag == "true" || clip_flag == "1") {
+                    options.ground_clipping = 1;
+                    ++i;
+                } else {
+                    options.ground_clipping = 1;
+                }
+            } else {
+                options.ground_clipping = 1;
             }
         } else if (arg == "--dry-run") {
             options.dry_run = true;
@@ -1296,8 +1327,6 @@ int main(int argc, char *argv[]) {
                 sampled_params, {"field", "layout", "plot_size_x"}, 1.299f) * ground_margin;
             float ground_y = getJsonNumberOr<float>(
                 sampled_params, {"field", "layout", "plot_size_y"}, 3.831f) * ground_margin;
-            //float ground_x = sampled_params["field"]["layout"]["plot_size_x"].get<float>() * 2; // 200 percent buffer
-            //float ground_y = sampled_params["field"]["layout"]["plot_size_y"].get<float>() * 2; // 200 percent buffer
 
             helios::vec3 tile_center = make_vec3(0, 0, 0);
             helios::vec2 tile_size = make_vec2(0.1, 0.1);
@@ -1521,18 +1550,21 @@ int main(int argc, char *argv[]) {
                         // Translate XML loaded plant coordinates by the plot offset
                         for(int i=0; i < plot_plant_IDs.size(); i++) {
                             uint pid = plot_plant_IDs[i];
+                            vec3 saved_base = plantarchitecture.getPlantBasePosition(pid);
                             vec3 shift = make_vec3(origin.x, origin.y, 0);
                             
                             // 1. Update logical plant base position
-                            plantarchitecture.setPlantBasePosition(pid, shift);
+                            plantarchitecture.setPlantBasePosition(pid, saved_base + shift);
                             
-                            // 2. Force translate all 3D mesh objects associated with this plant
-                            std::vector<uint> single_plant_obj_ids = plantarchitecture.getAllPlantObjectIDs(pid);
-                            for (uint obj_id : single_plant_obj_ids) {
-                                context.translateObject(obj_id, shift);
+                            // 2. Force translate all 3D mesh objects associated with this plant if plot offset is non-zero
+                            if (shift.x != 0.0f || shift.y != 0.0f) {
+                                std::vector<uint> single_plant_obj_ids = plantarchitecture.getAllPlantObjectIDs(pid);
+                                for (uint obj_id : single_plant_obj_ids) {
+                                    context.translateObject(obj_id, shift);
+                                }
                             }
                             
-                            std::cout << "Loaded plant from XML (ID:" << pid << ") and forcefully translated by (" << origin.x << ", " << origin.y << "): " << xml_path << std::endl;
+                            std::cout << "Loaded plant from XML (ID:" << pid << ") with base (" << saved_base.x << ", " << saved_base.y << ", " << saved_base.z << ") and plot offset (" << origin.x << ", " << origin.y << "): " << xml_path << std::endl;
                             
                             // Label XML plant primitives with unique global ID
                             std::vector<uint> uuids_xml_plant = context.getObjectPrimitiveUUIDs(plantarchitecture.getAllPlantObjectIDs(pid));
@@ -1595,8 +1627,23 @@ int main(int argc, char *argv[]) {
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
+        bool ground_clipping_enabled = false;
+        if (args.ground_clipping == 1) {
+            ground_clipping_enabled = true;
+        } else if (args.ground_clipping == 0) {
+            ground_clipping_enabled = false;
+        } else {
+            ground_clipping_enabled = getJsonBoolOr(sampled_params, {"environment", "soil", "ground_clipping"}, false);
+        }
+
         // Age only plants that were built from library (not from XML)
         if (!plant_IDs_aging.empty()) {
+            // (ground clipping disabled for roundtrip identity test)
+            // if (ground_clipping_enabled) {
+            //     plantarchitecture.enableGroundClipping(0.0f);
+            //     std::cout << "[INFO] Enabled ground clipping at Z=0.0m for plant growth." << std::endl;
+            // }
+
             // plants are planted in a single day -> Age all together
             // Therefore there is no dap in plants element
             // Allow --dap command-line argument to override the JSON metadata value
@@ -1798,6 +1845,34 @@ int main(int argc, char *argv[]) {
                 camera_setup.cam_prop.HFOV = new_hfov;
             } else {
                 std::cout << "[WARN] focus-plant: could not compute plant bounding box, keeping original FOV" << std::endl;
+            }
+        }
+
+        // Handle ground occlusion (Shift ground plane below lowest plant organ to prevent clipping)
+        bool ground_occlusion_enabled = true;
+        if (args.ground_occlusion == 0) {
+            ground_occlusion_enabled = false;
+        } else if (args.ground_occlusion == 1) {
+            ground_occlusion_enabled = true;
+        } else {
+            ground_occlusion_enabled = getJsonBoolOr(sampled_params, {"environment", "soil", "ground_occlusion"}, true);
+        }
+
+        if (!ground_occlusion_enabled && !UUIDs_ground.empty()) {
+            float min_plant_z = 0.0f;
+            for (uint plantID : UUIDs_plants) {
+                std::vector<uint> plant_uuids = plantarchitecture.getAllPlantUUIDs(plantID);
+                for (uint uuid : plant_uuids) {
+                    for (const auto& v : context.getPrimitiveVertices(uuid)) {
+                        min_plant_z = std::min(min_plant_z, v.z);
+                    }
+                }
+            }
+            if (min_plant_z < 0.0f) {
+                float shift_z = min_plant_z - 0.02f;
+                context.translatePrimitive(UUIDs_ground, make_vec3(0.f, 0.f, shift_z));
+                std::cout << "[INFO] Ground occlusion disabled: Lowest plant Z=" << min_plant_z
+                          << " m. Translated ground plane down by " << shift_z << " m to avoid organ clipping." << std::endl;
             }
         }
 
