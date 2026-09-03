@@ -1408,7 +1408,15 @@ int main(int argc, char *argv[]) {
         context.setPrimitiveData(UUIDs_ground, "emissivity_LW", 0.95f);
 
         // Create multiple plots in a grid pattern
-        std::vector<uint> plant_IDs_aging;  // Plants that need aging (built from library, age 0)
+        std::vector<uint> plant_IDs_aging;  // Plants built from library (for per-plant mask labeling)
+        // DAP (days after planting) determines how far each library-grown plant ages internally via
+        // buildPlantInstanceFromLibrary(pos, age). --dap overrides the JSON metadata value.
+        if (args.dap >= 0) {
+            sampled_params["metadata"]["dap"] = args.dap;
+            std::cout << "[INFO] DAP overridden by --dap flag: " << args.dap << " days" << std::endl;
+        }
+        float plant_age_days = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
+
         if (mode == GenerationMode::AUTO) {
             // Auto plot generation - Earl
             // In auto mode, use auto config to geneate plots and remove the config
@@ -1445,7 +1453,7 @@ int main(int argc, char *argv[]) {
                                       auto_planting_cfg["plant_spacing_y"]),
                             make_int2(auto_planting_cfg["planting_rows"],
                                       auto_planting_cfg["plant_count"]),
-                            0);
+                            plant_age_days);
 
                     // Add to the aging collection
                     plant_IDs_aging.insert(plant_IDs_aging.end(),
@@ -1583,11 +1591,11 @@ int main(int argc, char *argv[]) {
                             }
                         }
                     } else {
-                        // Build plant from library (needs aging)
+                        // Build plant from library (grows internally to plant_age_days via age arg)
                         uint plantID;
-                        plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, true);
+                        plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, plant_age_days);
                         plant_IDs_aging.push_back(plantID);
-                        std::cout << "Generated plant from library (ID:" << plantID << ")" << std::endl;
+                        std::cout << "Generated plant from library (ID:" << plantID << ", age:" << plant_age_days << ")" << std::endl;
                     }
 
                     // Assign unique global IDs for Bounding Box and Segmentation consistency
@@ -1636,29 +1644,9 @@ int main(int argc, char *argv[]) {
             ground_clipping_enabled = getJsonBoolOr(sampled_params, {"environment", "soil", "ground_clipping"}, false);
         }
 
-        // Age only plants that were built from library (not from XML)
-        if (!plant_IDs_aging.empty()) {
-            // (ground clipping disabled for roundtrip identity test)
-            // if (ground_clipping_enabled) {
-            //     plantarchitecture.enableGroundClipping(0.0f);
-            //     std::cout << "[INFO] Enabled ground clipping at Z=0.0m for plant growth." << std::endl;
-            // }
-
-            // plants are planted in a single day -> Age all together
-            // Therefore there is no dap in plants element
-            // Allow --dap command-line argument to override the JSON metadata value
-            if (args.dap >= 0) {
-                sampled_params["metadata"]["dap"] = args.dap;
-                std::cout << "[INFO] DAP overridden by --dap flag: " << args.dap << " days" << std::endl;
-            }
-            float dap = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
-            if (dap > 0) {
-                plantarchitecture.advanceTime(plant_IDs_aging, dap);
-                update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
-                std::cout << "Advanced " << plant_IDs_aging.size() << " plants to age: " << dap
-                          << " days" << std::endl;
-            }
-        }
+        // Plants built from the library (AUTO canopy or MANUAL single) are already grown to
+        // plant_age_days internally via buildPlantInstanceFromLibrary(pos, age)/Canopy(..., age),
+        // so a separate batch advanceTime() here would double-age them and is omitted.
         update_leafoptics(context, plantarchitecture, leafoptics, sampled_params);
 
         // Re-assign unique global primitive instance IDs for organ masks AFTER aging/growth completes!
@@ -1821,9 +1809,11 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // 3. Compute symmetric half-extent from optical center with +20% margin to guarantee no clipping
-                float half_ext_x = std::max(std::abs(min_vx), std::abs(max_vx)) * 1.20f;
-                float half_ext_y = std::max(std::abs(min_vy), std::abs(max_vy)) * 1.20f;
+                // 3. Compute symmetric half-extent from optical center with +5% margin,
+                //    matching the PyTorch compute_focus_plant_camera() convention so both
+                //    renderers frame the plant identically.
+                float half_ext_x = std::max(std::abs(min_vx), std::abs(max_vx)) * 1.05f;
+                float half_ext_y = std::max(std::abs(min_vy), std::abs(max_vy)) * 1.05f;
                 half_ext_x = std::max(half_ext_x, 1e-4f);
                 half_ext_y = std::max(half_ext_y, 1e-4f);
 

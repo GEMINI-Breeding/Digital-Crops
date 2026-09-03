@@ -306,10 +306,9 @@
         },
         "gravitropic_curvature": {
           "distribution": {
-            "type": "uniform",
+            "type": "constant",
             "params": {
-              "min": -800.0,
-              "max": 100.0
+              "value": 200.0
             }
           }
         },
