@@ -1,10 +1,10 @@
 """
 visualize_utm.py
 ────────────────
-Plot boundary (WGS-84 GeoJSON) 와 Drone Orthophoto 를
-UTM 좌표계로 변환하여 시각화합니다.
+Visualize plot boundaries (WGS-84 GeoJSON) and Drone Orthophotos
+by reprojecting them into a UTM coordinate system.
 
-실행:
+Usage:
     python visualize_utm.py
 """
 
@@ -21,7 +21,7 @@ import rasterio
 import geopandas as gpd
 from pyproj import Transformer
 
-# ── 경로 설정 ──────────────────────────────────────────────────────────────
+# ── Path Configuration ────────────────────────────────────────────────────
 ortho_path       = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/real_data/2025-06-06/Drone/2025-06-06-RGB.tif"
 geojson_path     = "/home/lion397/GEMINI/heesup/dataset/2025_Davis/Plot-Boundary-WGS84.geojson"
 helios_output_dir= "/home/lion397/GEMINI/heesup/dataset/2025_Davis/HELIOS_20260215/"
@@ -31,7 +31,7 @@ output_dir       = Path(__file__).parent
 
 
 def latlon_bounds_to_utm(left, right, bottom, top, src_crs, dst_crs):
-    """4-corner 변환으로 WGS-84 bounding box → UTM bounding box."""
+    """Convert WGS-84 bounding box to UTM bounding box via 4-corner projection."""
     t = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
     ul = t.transform(left,  top)
     ur = t.transform(right, top)
@@ -45,12 +45,12 @@ def latlon_bounds_to_utm(left, right, bottom, top, src_crs, dst_crs):
     )
 
 
-# ── 1. GeoJSON 로드 ────────────────────────────────────────────────────────
+# ── 1. Load GeoJSON ───────────────────────────────────────────────────────
 print("Loading GeoJSON …")
 gdf = gpd.read_file(geojson_path)
 print(f"  {len(gdf)} plots, original CRS: {gdf.crs}")
 
-# ── 2. Ortho 로드 (다운샘플) ───────────────────────────────────────────────
+# ── 2. Load Orthophoto (downsampled) ─────────────────────────────────────
 print("Loading orthophoto …")
 with rasterio.open(ortho_path) as src:
     ortho_crs  = src.crs
@@ -64,14 +64,14 @@ with rasterio.open(ortho_path) as src:
 print(f"  Ortho CRS : {ortho_crs}")
 print(f"  Ortho bounds (WGS-84): {ob}")
 
-# ── 3. UTM zone 자동 결정 ──────────────────────────────────────────────────
+# ── 3. Auto-detect UTM zone ──────────────────────────────────────────────
 lon_c    = (ob.left + ob.right)  / 2
 lat_c    = (ob.bottom + ob.top)  / 2
 utm_zone = int((lon_c + 180) / 6) + 1
 utm_crs  = f"EPSG:{32600 + utm_zone if lat_c >= 0 else 32700 + utm_zone}"
 print(f"\nUTM zone: {utm_zone}  →  {utm_crs}")
 
-# ── 4. 좌표 변환 ───────────────────────────────────────────────────────────
+# ── 4. Coordinate Reprojection ───────────────────────────────────────────
 # GeoDataFrame → UTM
 if str(gdf.crs) != ortho_crs.to_string():
     gdf = gdf.to_crs(str(ortho_crs))
@@ -89,11 +89,11 @@ print(f"  Northing: {utm_bottom:.1f} – {utm_top:.1f} m  (Δ={utm_top-utm_botto
 plots_bounds_utm = gdf_utm.total_bounds   # [minx, miny, maxx, maxy]
 print(f"Plots UTM bounds: {plots_bounds_utm}")
 
-# ── 5. Helios 이미지 목록 ─────────────────────────────────────────────────
+# ── 5. Enumerate Helios Images ───────────────────────────────────────────
 dap_images = sorted(glob.glob(os.path.join(helios_output_dir, f"dap_{dap}_plot_*_0000.jpeg")))
 print(f"\nFound {len(dap_images)} Helios images for DAP {dap}")
 
-# ── 6. Helios 이미지 → ortho 픽셀 합성 ───────────────────────────────────
+# ── 6. Composite Helios Images onto Orthophoto Canvas ────────────────────
 ortho_h, ortho_w = ortho_overview.shape[:2]
 ext_w = utm_right  - utm_left
 ext_h = utm_top    - utm_bottom
@@ -132,7 +132,7 @@ if dap_images:
                 hi = np.stack([hi]*3, axis=-1)
             ortho_with_helios[px_miny:px_maxy, px_minx:px_maxx] = hi[:, :, :3]
 
-# ── 7. 시각화 ─────────────────────────────────────────────────────────────
+# ── 7. Visualization ─────────────────────────────────────────────────────
 print("\nRendering figure …")
 fig, axes = plt.subplots(1, 2, figsize=(24, 12))
 fig.suptitle(
@@ -172,7 +172,7 @@ ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 
-# ── 저장 ──────────────────────────────────────────────────────────────────
+# ── Save Output ──────────────────────────────────────────────────────────
 out_path = output_dir / f"dataset_overview_UTM_dap{dap}.png"
 plt.savefig(out_path, dpi=150, bbox_inches='tight')
 print(f"\n✓ Saved → {out_path}")

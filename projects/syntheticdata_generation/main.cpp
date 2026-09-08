@@ -119,6 +119,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
                                getJsonNumberOr<float>(arch_json, {"vegetative_bud_break_probability"}, -1.0f));
     float fruit_set_prob = getJsonNumberOr<float>(arch_json, {"shoot", "fruit_set_probability"}, -1.0f);
     float internode_len_max = getJsonNumberOr<float>(arch_json, {"shoot", "internode_length_max"}, -1.0f);
+    int max_nodes_val = getJsonNumberOr<int>(arch_json, {"shoot", "max_nodes"}, -1);
     float internode_len_mult = getJsonNumberOr<float>(arch_json, {"shoot", "internode_length_multiplier"}, 1.0f);
     float elongation_rate = getJsonNumberOr<float>(arch_json, {"shoot", "elongation_rate_max"}, -1.0f);
     float gravitropic_curv = getJsonNumberOr<float>(arch_json, {"shoot", "gravitropic_curvature"}, -99999.0f);
@@ -166,21 +167,21 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
         }
     } else {
         if (genotype == "bush" || genotype == "erect") {
-            if (internode_len_max < 0) internode_len_max = 0.09f;
+            if (internode_len_max < 0) internode_len_max = 0.03f;
+            if (max_nodes_val < 0) max_nodes_val = 9;
             if (leaf_pitch < -900) leaf_pitch = 45.0f;
-            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.5f;
-            if (gravitropic_curv < -90000) gravitropic_curv = -200.0f;
+            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.35f;
         } else if (genotype == "spreading") {
-            if (internode_len_max < 0) internode_len_max = 0.14f;
-            if (leaf_pitch < -900) leaf_pitch = 15.0f;
-            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.6f;
-            if (gravitropic_curv < -90000) gravitropic_curv = -600.0f;
+            if (internode_len_max < 0) internode_len_max = 0.045f;
+            if (max_nodes_val < 0) max_nodes_val = 10;
+            if (leaf_pitch < -900) leaf_pitch = 25.0f;
+            if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.45f;
         } else if (genotype == "vine" || genotype == "climbing") {
-            if (internode_len_max < 0) internode_len_max = 0.22f;
+            if (internode_len_max < 0) internode_len_max = 0.06f;
+            if (max_nodes_val < 0) max_nodes_val = 12;
             if (leaf_pitch < -900) leaf_pitch = 20.0f;
             if (veg_bud_break_prob < 0) veg_bud_break_prob = 0.25f;
-            if (gravitropic_curv < -90000) gravitropic_curv = -900.0f;
-            if (tortuosity_val < 0) tortuosity_val = 8.0f;
+            if (tortuosity_val < 0) tortuosity_val = 4.0f;
         }
     }
 
@@ -196,6 +197,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
             sp.vegetative_bud_break_probability_max = veg_bud_break_prob;
         }
         if (fruit_set_prob >= 0.0f) sp.fruit_set_probability = fruit_set_prob;
+        if (max_nodes_val > 0 && shoot_label != "unifoliate") sp.max_nodes = static_cast<uint>(max_nodes_val);
         if (internode_len_max > 0.0f) sp.internode_length_max = internode_len_max;
         else if (internode_len_mult != 1.0f) sp.internode_length_max = sp.internode_length_max.val() * internode_len_mult;
         if (elongation_rate > 0.0f) sp.elongation_rate_max = elongation_rate;
