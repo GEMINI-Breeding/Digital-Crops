@@ -147,6 +147,11 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
     float petiole_len_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "length_multiplier"}, 1.0f);
     float petiole_rad_mult = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "radius_multiplier"}, 1.0f);
     float petiole_curvature = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "curvature"}, -99999.0f);
+    // Helios 1.3.87 petiole bending under the leaflets' weight (PhytomerParameters::petiole.flexibility, dimensionless
+    // compliance; .flexibility_aging in days). The XML does not record them, so a plant must be read back with the
+    // same config it was grown with for its petioles to bend the same way.
+    float petiole_flexibility = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "flexibility"}, -1.0f);
+    float petiole_flexibility_aging = getJsonNumberOr<float>(arch_json, {"phytomer", "petiole", "flexibility_aging"}, -1.0f);
 
     // --- Phytomer: Internode Parameters ---
     float internode_pitch = getJsonNumberOr<float>(arch_json, {"phytomer", "internode", "pitch"}, -999.0f);
@@ -224,6 +229,8 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
         if (petiole_len_mult != 1.0f) sp.phytomer_parameters.petiole.length = sp.phytomer_parameters.petiole.length.val() * petiole_len_mult;
         if (petiole_rad_mult != 1.0f) sp.phytomer_parameters.petiole.radius = sp.phytomer_parameters.petiole.radius.val() * petiole_rad_mult;
         if (petiole_curvature > -90000.0f) sp.phytomer_parameters.petiole.curvature = petiole_curvature;
+        if (petiole_flexibility >= 0.0f) sp.phytomer_parameters.petiole.flexibility = petiole_flexibility;
+        if (petiole_flexibility_aging >= 0.0f) sp.phytomer_parameters.petiole.flexibility_aging = petiole_flexibility_aging;
 
         // Phytomer: Internode
         if (internode_pitch > -900.0f) sp.phytomer_parameters.internode.pitch = internode_pitch;
@@ -778,6 +785,7 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --plant-type, --species TYPE Set plant model (cowpea, bean, sorghum, soybean, maize, etc.)\n"
                       << "  --genotype ARCHETYPE     Set genotype archetype (bush, spreading, vine, dwarf, tall, random)\n"
                       << "  --save-xml               Save plant structure XML files (default: true)\n"
+                      << "  --dump-organ-poses PATH  Write every organ's pose (leaf transforms, centerlines) once the plants are built\n"
                       << "  --no-save-xml            Skip saving XML files\n"
                       << "  -r, --rotation           Enable rotation view\n"
                       << "  -g, --grow               Enable grow mode\n"
@@ -864,6 +872,8 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.params_file = argv[++i];
             } else if (arg == "--input-xml" || arg == "--xml") {
                 options.input_xml = argv[++i];
+            } else if (arg == "--dump-organ-poses") {
+                options.dump_organ_poses = argv[++i];
             } else {
                 std::printf("Unknown argument: %s\n", arg.c_str());
                 std::printf("Use --help for usage information\n");
@@ -899,6 +909,132 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
     return options;
 }
 
+
+// --dump-organ-poses <path>: the pose of every organ of every plant as the plant architecture holds it, for comparing
+// a Python forward kinematics of the same XML against Helios (image-to-l-system, plan 20260923-helios-1387-upgrade).
+// One line per organ, whitespace separated, lengths in metres:
+//   P plant base_x base_y base_z
+//   I plant shoot node n x y z ...                   internode centerline (getInternodeNodePositions)
+//   T plant shoot node petiole n x y z ...           petiole centerline
+//   L plant shoot node petiole leaf objID bx by bz T00 .. T33
+//                                                    leaf base (leaf_bases) and the leaf object's 4x4 transformation
+//                                                    matrix, row-major: rotation * scale in the upper 3x3, the object
+//                                                    origin in the last column; the prototype's midrib is +x, its
+//                                                    blade normal +z
+//   D plant shoot node petiole bud n x y z ...       peduncle centerline
+//   F plant shoot node petiole bud k objID bx by bz T00 .. T33  flower or fruit: its base and object transform
+static void dumpOrganPoses(helios::Context &context, PlantArchitecture &plantarchitecture, const std::string &path) {
+    std::ofstream out(path);
+    if (!out) {
+        helios_runtime_error("ERROR: cannot open --dump-organ-poses file " + path + " for writing.");
+    }
+    out << std::setprecision(9);
+    auto write_T = [&](uint objID) {
+        float T[16];
+        context.getObjectTransformationMatrix(objID, T);
+        for (float v: T) {
+            out << " " << v;
+        }
+    };
+    auto write_line = [&](const std::vector<helios::vec3> &line) {
+        out << " " << line.size();
+        for (const helios::vec3 &v: line) {
+            out << " " << v.x << " " << v.y << " " << v.z;
+        }
+    };
+    size_t n_leaves = 0;
+    for (uint plantID: plantarchitecture.getAllPlantIDs()) {
+        const helios::vec3 base = plantarchitecture.getPlantBasePosition(plantID);
+        out << "P " << plantID << " " << base.x << " " << base.y << " " << base.z << "\n";
+        for (uint shootID: plantarchitecture.getAllShootIDs(plantID)) {
+            const auto &shoot = plantarchitecture.getPlantShoot(plantID, shootID);
+            for (size_t node = 0; node < shoot->phytomers.size(); node++) {
+                const auto &ph = shoot->phytomers.at(node);
+                out << "I " << plantID << " " << shootID << " " << node;
+                write_line(ph->getInternodeNodePositions());
+                out << "\n";
+                for (size_t pet = 0; pet < ph->petiole_vertices.size(); pet++) {
+                    out << "T " << plantID << " " << shootID << " " << node << " " << pet;
+                    write_line(ph->petiole_vertices.at(pet));
+                    out << "\n";
+                    if (pet < ph->leaf_objIDs.size()) {
+                        for (size_t leaf = 0; leaf < ph->leaf_objIDs.at(pet).size(); leaf++) {
+                            const uint objID = ph->leaf_objIDs.at(pet).at(leaf);
+                            const helios::vec3 lb = ph->leaf_bases.at(pet).at(leaf);
+                            out << "L " << plantID << " " << shootID << " " << node << " " << pet << " " << leaf << " " << objID << " " << lb.x << " " << lb.y << " " << lb.z;
+                            write_T(objID);
+                            out << "\n";
+                            n_leaves++;
+                            if (std::getenv("DUMP_LEAF_VERTS") != nullptr) {
+                                // V ...: the blade's facets as vertex triples (petiolule excluded) in the leaf object's own frame,
+                                // i.e. mapped back through the inverse of its transformation matrix
+                                float T[16];
+                                context.getObjectTransformationMatrix(objID, T);
+                                const helios::vec3 o(T[3], T[7], T[11]);
+                                const helios::vec3 cx(T[0], T[4], T[8]), cy(T[1], T[5], T[9]), cz(T[2], T[6], T[10]);
+                                std::vector<helios::vec3> local;
+                                std::vector<helios::vec2> local_uv;
+                                std::string tex;
+                                for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
+                                    if (context.doesPrimitiveDataExist(UUID, "object_label")) {
+                                        std::string lab;
+                                        context.getPrimitiveData(UUID, "object_label", lab);
+                                        if (lab == "petiolule") continue;
+                                    }
+                                    std::vector<helios::vec3> pv = context.getPrimitiveVertices(UUID);
+                                    std::vector<helios::vec2> uv = context.getPrimitiveTextureUV(UUID);
+                                    if (uv.size() != pv.size()) {
+                                        uv.assign(pv.size(), helios::make_vec2(-1, -1));   // untextured: no alpha to cut by
+                                    }
+                                    if (tex.empty()) {
+                                        tex = context.getPrimitiveTextureFile(UUID);
+                                    }
+                                    if (pv.size() == 4) {   // a patch as two triangles, so every three vertices are a facet
+                                        pv = {pv[0], pv[1], pv[2], pv[0], pv[2], pv[3]};
+                                        uv = {uv[0], uv[1], uv[2], uv[0], uv[2], uv[3]};
+                                    } else if (pv.size() != 3) {
+                                        continue;
+                                    }
+                                    for (size_t q = 0; q < pv.size(); q++) {
+                                        const helios::vec3 d = pv[q] - o;   // columns are R*S: project and divide by |col|^2
+                                        local.push_back(helios::make_vec3((d * cx) / (cx * cx), (d * cy) / (cy * cy), (d * cz) / (cz * cz)));
+                                        local_uv.push_back(uv[q]);
+                                    }
+                                }
+                                out << "V " << plantID << " " << shootID << " " << node << " " << pet << " " << leaf;
+                                write_line(local);
+                                out << "\n";
+                                // W ...: the texture those facets are cut from and each vertex's texture coordinate
+                                out << "W " << plantID << " " << shootID << " " << node << " " << pet << " " << leaf << " " << (tex.empty() ? "none" : tex) << " " << local_uv.size();
+                                for (const helios::vec2 &t: local_uv) {
+                                    out << " " << t.x << " " << t.y;
+                                }
+                                out << "\n";
+                            }
+                        }
+                    }
+                }
+                for (size_t pet = 0; pet < ph->floral_buds.size(); pet++) {
+                    for (size_t bud = 0; bud < ph->floral_buds.at(pet).size(); bud++) {
+                        if (pet < ph->peduncle_vertices.size() && bud < ph->peduncle_vertices.at(pet).size() && !ph->peduncle_vertices.at(pet).at(bud).empty()) {
+                            out << "D " << plantID << " " << shootID << " " << node << " " << pet << " " << bud;
+                            write_line(ph->peduncle_vertices.at(pet).at(bud));
+                            out << "\n";
+                        }
+                        const auto &fb = ph->floral_buds.at(pet).at(bud);
+                        for (size_t k = 0; k < fb.inflorescence_objIDs.size(); k++) {
+                            const helios::vec3 fbase = k < fb.inflorescence_bases.size() ? fb.inflorescence_bases.at(k) : helios::make_vec3(0, 0, 0);
+                            out << "F " << plantID << " " << shootID << " " << node << " " << pet << " " << bud << " " << k << " " << fb.inflorescence_objIDs.at(k) << " " << fbase.x << " " << fbase.y << " " << fbase.z;
+                            write_T(fb.inflorescence_objIDs.at(k));
+                            out << "\n";
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "DUMP organ poses: " << n_leaves << " leaves -> " << path << std::endl;
+}
 
 // System RAM monitoring function
 inline void printSystemMemoryUsage(const std::string& label = "") {
@@ -1637,6 +1773,9 @@ int main(int argc, char *argv[]) {
 
         std::vector<uint> UUIDs_plants = plantarchitecture.getAllPlantIDs();
         std::cout << "Number of crops: " << UUIDs_plants.size() << std::endl;
+        if (!args.dump_organ_poses.empty()) {
+            dumpOrganPoses(context, plantarchitecture, args.dump_organ_poses);
+        }
         bool ground_clipping_enabled = false;
         if (args.ground_clipping == 1) {
             ground_clipping_enabled = true;

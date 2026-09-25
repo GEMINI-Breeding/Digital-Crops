@@ -55,6 +55,7 @@ struct CommandLineOptions {
     std::string plant_type; // Override plant_type from CLI (e.g. cowpea, bean, sorghum, soybean, maize)
     std::string genotype;   // Override genotype archetype (e.g. bush, spreading, vine, dwarf, tall, random)
     std::string input_xml;  // Optional plant XML file to load and render
+    std::string dump_organ_poses; // Optional path: write every organ's pose once the plants are built (see dumpOrganPoses)
     int ground_occlusion = -1; // -1 = use JSON, 0 = disable ground occlusion (lower ground below lowest plant vertex), 1 = enable ground at Z=0
     int ground_clipping = -1;  // -1 = use JSON, 0 = disable ground clipping, 1 = enable ground clipping at Z=0 (prune subsurface organs during growth)
 };
