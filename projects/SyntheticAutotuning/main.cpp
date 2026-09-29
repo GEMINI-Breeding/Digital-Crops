@@ -144,11 +144,11 @@ uint CowpeaFlowerPrototype_custom(Context *ctx, uint subdivisions, bool flower_i
 // Builds the cowpea canopy: shoot parameters, plant instances on the bed grid, and the growth
 // advance. Shared by the ray-traced camera path and the rasterized geometry path so that a
 // geometry parameter tuned against the fast rasterizer means the same thing in a full render.
-std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, unsigned scene_seed,
-                              std::vector<Site> *sites_out = nullptr) {
-
-    const vec2 bed_size(cfg.f("canopy.bed_size_x"), cfg.f("canopy.bed_size_y"));
-    const vec2 plant_spacing(cfg.f("canopy.plant_spacing_x"), cfg.f("canopy.plant_spacing_y"));
+//! Load the library cowpea model and apply every shoot-parameter override in the config. Shared by
+//! buildCanopy() and loadCanopyXML(): a plant-structure XML is rebuilt from the shoot types registered
+//! here (leaf prototype, petiole radius, flower prototype), so a loaded plant must see the same ones a
+//! grown plant does. Returns canopy.library_defaults.
+bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture) {
 
     // --- plant model --------------------------------------------------------
     plantarchitecture.optionalOutputObjectData("plantID");
@@ -326,6 +326,260 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     sp.phytomer_parameters.inflorescence.unique_prototypes = 20;
     plantarchitecture.updateCurrentShootParameters("trifoliate", sp);
     } // !library_defaults
+    return library_defaults;
+}
+
+// Leaf chlorophyll without the nitrogen model, per trifoliate leaf: the leaflets on one petiole are the same age and share one
+// value, Cab = leaf.chlorophyll * (y + (1 - y) * min(1, age / leaf.chlorophyll_mature_age)) + N(0, leaf.chlorophyll_sd), with
+// y = leaf.chlorophyll_young_fraction (young leaves paler; 1 = no age effect), plus an optional small per-leaflet jitter
+// (leaf.chlorophyll_leaflet_sd), clamped to leaf.chlorophyll_min..max. Published as the leaf nitrogen the binned PROSPECT path
+// reads. Draws come from each plant's own stream, so a plant's colours depend only on its site seed.
+void assignLeafChlorophyll(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs,
+                           const std::vector<Site> &sites) {
+    const bool leaf_cab_variation = cfg.f("leaf.chlorophyll_sd", 0.f) > 0.f || cfg.f("leaf.chlorophyll_young_fraction", 1.f) < 1.f;
+    if (!leaf_cab_variation) return;
+    if (cfg.i("leaf.nitrogen_model", 0)) {
+        helios_runtime_error("ERROR (buildCanopy): leaf chlorophyll variation and leaf.nitrogen_model both set leaf nitrogen; use one.");
+    }
+    const float cab_per_N = 100.f * cfg.f("leaf.f_photosynthetic", 0.50f) * cfg.f("leaf.N_to_Cab_coefficient", 0.40f);
+    const float cab_mature = cfg.f("leaf.chlorophyll"), young = cfg.f("leaf.chlorophyll_young_fraction", 1.f);
+    const float mature_age = std::max(cfg.f("leaf.chlorophyll_mature_age", 8.f), 1e-3f);
+    const float leaf_sd = cfg.f("leaf.chlorophyll_sd", 0.f), leaflet_sd = cfg.f("leaf.chlorophyll_leaflet_sd", 0.f);
+    const float cab_min = cfg.f("leaf.chlorophyll_min", 20.f), cab_max = cfg.f("leaf.chlorophyll_max", 100.f);
+    std::vector<float> drawn;
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        const unsigned stream = k < sites.size() ? sites[k].seed : unsigned(k + 1);
+        std::mt19937 rng(hashSeed(stream, 7));
+        std::normal_distribution<float> unit(0.f, 1.f);
+        for (uint shootID: plantarchitecture.getAllShootIDs(plantIDs[k])) {
+            if (plantarchitecture.isShootPruned(plantIDs[k], shootID)) continue;
+            for (const auto &phytomer: plantarchitecture.getPlantShoot(plantIDs[k], shootID)->phytomers) {
+                const float age_factor = young + (1.f - young) * std::min(1.f, phytomer->age / mature_age);
+                for (const std::vector<uint> &leaflets: phytomer->leaf_objIDs) {
+                    const float leaf_cab = cab_mature * age_factor + leaf_sd * unit(rng);
+                    for (uint objID: leaflets) {
+                        if (!context.doesObjectExist(objID)) continue;
+                        const float value = std::clamp(leaf_cab + leaflet_sd * unit(rng), cab_min, cab_max);
+                        context.setObjectData(objID, "leaf_nitrogen_gN_m2", value / cab_per_N);
+                        drawn.push_back(value);
+                    }
+                }
+            }
+        }
+    }
+    std::sort(drawn.begin(), drawn.end());
+    auto q = [&](float f) { return drawn.empty() ? 0.f : drawn[size_t(f * float(drawn.size() - 1))]; };
+    std::cout << "DIAG chlorophyll_per_leaf n=" << drawn.size() << " Cab_p10=" << q(0.1f) << " Cab_p50=" << q(0.5f) << " Cab_p90=" << q(0.9f) << std::endl;
+}
+
+// Tag every primitive with the index of its site, so that a per-pixel map of it can be written
+// by either the ray tracer or the label rasterizer, and print the sites so the fitting code can
+// name each plant in the scene by (position, yaw, age, seed) and reproduce it.
+void tagSites(Context &context, PlantArchitecture &plantarchitecture, const std::vector<Site> &sites) {
+    for (size_t k = 0; k < sites.size(); k++) {
+        const Site &s = sites[k];
+        context.setPrimitiveData(plantarchitecture.getAllPlantUUIDs(s.plantID), "siteIndex", int(k + 1));
+        std::cout << "SITE " << k << " " << std::setprecision(9) << s.position.x << " " << s.position.y << " "
+                  << rad2deg(s.yaw_rad) << " " << s.age_days << " " << s.seed << " " << s.plantID << std::endl;
+    }
+}
+
+// diag.leafdump <path>: every leaf object's plant, index in the plant, primitive count, area, centroid and area-weighted normal, so
+// that a grown canopy and the same canopy read back from XML can be compared organ by organ.
+void dumpLeaves(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs) {
+    if (!cfg.has("diag.leafdump")) return;
+    std::ofstream out(cfg.s("diag.leafdump"));
+    // base: the attachment point the plant recorded (stale after a post-growth yaw); tip: the vertex farthest from it.
+    out << "# plant leaf n_prims area cx cy cz nx ny nz bx by bz tx ty tz\n" << std::setprecision(9);
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        const std::vector<uint> leaves = plantarchitecture.getPlantLeafObjectIDs(plantIDs[k]);
+        const std::vector<vec3> bases = plantarchitecture.getPlantLeafBases(plantIDs[k]);
+        for (size_t i = 0; i < leaves.size(); i++) {
+            const vec3 base = i < bases.size() ? bases[i] : make_vec3(0, 0, 0);
+            vec3 tip = base;
+            float area = 0.f;
+            vec3 c(0, 0, 0), n(0, 0, 0);
+            const std::vector<uint> prims = context.getObjectPrimitiveUUIDs(leaves[i]);
+            for (uint u: prims) {
+                const float a = context.getPrimitiveArea(u);
+                const std::vector<vec3> v = context.getPrimitiveVertices(u);
+                vec3 pc(0, 0, 0);
+                for (const vec3 &p: v) {
+                    pc = pc + p;
+                    if ((p - base).magnitude() > (tip - base).magnitude()) tip = p;
+                }
+                c = c + pc / float(v.size()) * a;
+                n = n + context.getPrimitiveNormal(u) * a;
+                area += a;
+            }
+            if (area > 0.f) c = c / area;
+            out << k << " " << i << " " << prims.size() << " " << area << " " << c.x << " " << c.y << " " << c.z << " " << n.x / std::max(area, 1e-12f) << " "
+                << n.y / std::max(area, 1e-12f) << " " << n.z / std::max(area, 1e-12f) << " " << base.x << " " << base.y << " " << base.z << " " << tip.x << " "
+                << tip.y << " " << tip.z << "\n";
+        }
+    }
+}
+
+// diag.leafxform <path>: every leaf object's transformation matrix as Helios stores it (row-major; origin in T[3], T[7], T[11]),
+// one line per leaf with its site index and object ID, so a leaf's pose can be read from the object itself rather than
+// measured off its vertices. Written after the per-plant yaw, where diag.leafruler writes.
+void dumpLeafTransforms(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs) {
+    if (!cfg.has("diag.leafxform")) return;
+    std::ofstream out(cfg.s("diag.leafxform"));
+    if (!out) {
+        helios_runtime_error("ERROR: cannot open diag.leafxform file " + cfg.s("diag.leafxform") + " for writing.");
+    }
+    out << "# plant objID T00 T01 T02 T03 T10 T11 T12 T13 T20 T21 T22 T23 T30 T31 T32 T33\n" << std::setprecision(9);
+    size_t n = 0;
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        for (uint objID: plantarchitecture.getPlantLeafObjectIDs(plantIDs[k])) {
+            if (!context.doesObjectExist(objID)) continue;
+            float T[16];
+            context.getObjectTransformationMatrix(objID, T);
+            out << k << " " << objID;
+            for (float t: T) out << " " << t;
+            out << "\n";
+            n++;
+        }
+    }
+    std::cout << "DIAG leafxform leaves=" << n << " file=" << cfg.s("diag.leafxform") << std::endl;
+}
+
+// diag.leafverts <prefix>: every leaf object's world vertices (<prefix>_verts.f32, its primitives in UUID order, xyz float32)
+// with an index (<prefix>_index.txt: site, objID, prototype index, leaf index on its petiole, leaves on that petiole, vertex
+// count, the 16 transform entries). Copies of one prototype carry the same vertices in the same order, so mapping each leaf
+// back through its own transform shows whether the transform still describes the geometry.
+void dumpLeafVertices(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs) {
+    if (!cfg.has("diag.leafverts")) return;
+    const std::string prefix = cfg.s("diag.leafverts");
+    std::ofstream index(prefix + "_index.txt");
+    std::ofstream verts(prefix + "_verts.f32", std::ios::binary);
+    index << "# plant objID prototype leaf n_leaves n_verts T00..T33\n" << std::setprecision(9);
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        for (uint shootID: plantarchitecture.getAllShootIDs(plantIDs[k])) {
+            for (const auto &phytomer: plantarchitecture.getPlantShoot(plantIDs[k], shootID)->phytomers) {
+                for (size_t p = 0; p < phytomer->leaf_objIDs.size(); p++) {
+                    for (size_t l = 0; l < phytomer->leaf_objIDs[p].size(); l++) {
+                        const uint objID = phytomer->leaf_objIDs[p][l];
+                        if (!context.doesObjectExist(objID)) continue;
+                        const int proto = (p < phytomer->leaf_prototype_index.size() && l < phytomer->leaf_prototype_index[p].size()) ? phytomer->leaf_prototype_index[p][l] : -9;
+                        size_t n = 0;
+                        for (uint u: context.getObjectPrimitiveUUIDs(objID)) {
+                            for (const vec3 &v: context.getPrimitiveVertices(u)) {
+                                const float xyz[3] = {v.x, v.y, v.z};
+                                verts.write(reinterpret_cast<const char *>(xyz), sizeof(xyz));
+                                n++;
+                            }
+                        }
+                        float T[16];
+                        context.getObjectTransformationMatrix(objID, T);
+                        index << k << " " << objID << " " << proto << " " << l << " " << phytomer->leaf_objIDs[p].size() << " " << n;
+                        for (float t: T) index << " " << t;
+                        index << "\n";
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "DIAG leafverts prefix=" << prefix << std::endl;
+}
+
+// diag.leafuvfit <path>: every leaf blade's pose read off its own geometry, independent of the prototype it was copied from:
+// the least-squares affine fit world = O + U*u + V*(v - 0.5) of the blade's vertices against their texture coordinates.
+// U runs along the midrib from base to tip (|U| = the blade length in the texture's frame), V across it, and O is the base
+// on the midrib; rms_mm is how far the blade departs from that plane (curvature, fold, droop). Petiolules and veins are
+// left out, as are primitives without texture coordinates or with the (0,0) placeholder at every vertex.
+void dumpLeafUVFit(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs) {
+    if (!cfg.has("diag.leafuvfit")) return;
+    std::ofstream out(cfg.s("diag.leafuvfit"));
+    if (!out) {
+        helios_runtime_error("ERROR: cannot open diag.leafuvfit file " + cfg.s("diag.leafuvfit") + " for writing.");
+    }
+    out << "# plant objID Ox Oy Oz Ux Uy Uz Vx Vy Vz rms_mm n_verts\n" << std::setprecision(9);
+    size_t written = 0, skipped = 0;
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        for (uint objID: plantarchitecture.getPlantLeafObjectIDs(plantIDs[k])) {
+            if (!context.doesObjectExist(objID)) continue;
+            // Normal equations of xyz on (1, u, v - 0.5).
+            double A[3][3] = {{0}}, B[3][3] = {{0}};
+            std::vector<std::pair<vec3, vec2>> samples;
+            for (uint u: context.getObjectPrimitiveUUIDs(objID)) {
+                if (context.doesPrimitiveDataExist(u, "object_label")) {
+                    std::string label;
+                    context.getPrimitiveData(u, "object_label", label);
+                    if (label == "petiolule" || label == "veins") continue;
+                }
+                const std::vector<vec2> uv = context.getPrimitiveTextureUV(u);
+                const std::vector<vec3> xyz = context.getPrimitiveVertices(u);
+                if (uv.size() != xyz.size()) continue;
+                bool placeholder = true;
+                for (const vec2 &t: uv) placeholder = placeholder && t.x == 0.f && t.y == 0.f;
+                if (placeholder) continue;
+                for (size_t i = 0; i < xyz.size(); i++) samples.emplace_back(xyz[i], uv[i]);
+            }
+            if (samples.size() < 3) {
+                skipped++;
+                continue;
+            }
+            for (const auto &s: samples) {
+                const double f[3] = {1.0, s.second.x, s.second.y - 0.5};
+                const double w[3] = {s.first.x, s.first.y, s.first.z};
+                for (int i = 0; i < 3; i++) {
+                    for (int j = 0; j < 3; j++) {
+                        A[i][j] += f[i] * f[j];
+                        B[i][j] += f[i] * w[j];
+                    }
+                }
+            }
+            // Solve A X = B (3x3, symmetric) by Cramer's rule; X rows are O, U, V.
+            const double det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) +
+                               A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+            if (std::fabs(det) < 1e-18) {
+                skipped++;
+                continue;
+            }
+            double inv[3][3];
+            inv[0][0] = (A[1][1] * A[2][2] - A[1][2] * A[2][1]) / det;
+            inv[0][1] = (A[0][2] * A[2][1] - A[0][1] * A[2][2]) / det;
+            inv[0][2] = (A[0][1] * A[1][2] - A[0][2] * A[1][1]) / det;
+            inv[1][0] = (A[1][2] * A[2][0] - A[1][0] * A[2][2]) / det;
+            inv[1][1] = (A[0][0] * A[2][2] - A[0][2] * A[2][0]) / det;
+            inv[1][2] = (A[0][2] * A[1][0] - A[0][0] * A[1][2]) / det;
+            inv[2][0] = (A[1][0] * A[2][1] - A[1][1] * A[2][0]) / det;
+            inv[2][1] = (A[0][1] * A[2][0] - A[0][0] * A[2][1]) / det;
+            inv[2][2] = (A[0][0] * A[1][1] - A[0][1] * A[1][0]) / det;
+            double X[3][3];
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    X[i][j] = inv[i][0] * B[0][j] + inv[i][1] * B[1][j] + inv[i][2] * B[2][j];
+                }
+            }
+            double sq = 0.0;
+            for (const auto &s: samples) {
+                const double f[3] = {1.0, s.second.x, s.second.y - 0.5};
+                const double w[3] = {s.first.x, s.first.y, s.first.z};
+                for (int j = 0; j < 3; j++) {
+                    const double r = w[j] - (f[0] * X[0][j] + f[1] * X[1][j] + f[2] * X[2][j]);
+                    sq += r * r;
+                }
+            }
+            out << k << " " << objID;
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) out << " " << X[i][j];
+            }
+            out << " " << std::sqrt(sq / double(samples.size())) * 1000.0 << " " << samples.size() << "\n";
+            written++;
+        }
+    }
+    std::cout << "DIAG leafuvfit leaves=" << written << " skipped=" << skipped << " file=" << cfg.s("diag.leafuvfit") << std::endl;
+}
+
+std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, unsigned scene_seed,
+                              std::vector<Site> *sites_out = nullptr) {
+
+    const vec2 bed_size(cfg.f("canopy.bed_size_x"), cfg.f("canopy.bed_size_y"));
+    const vec2 plant_spacing(cfg.f("canopy.plant_spacing_x"), cfg.f("canopy.plant_spacing_y"));
+    const bool library_defaults = configurePlantModel(cfg, plantarchitecture);
 
     // Row count was hard-coded at 2. Frame-level canopy cover is the gap being
     // closed here (synthetic 0.55 vs real 0.838), and row count is the lever that
@@ -599,46 +853,7 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
                   << " uniform_Cab=" << cfg.f("leaf.chlorophyll") << std::endl;
     }
 
-    // Leaf chlorophyll without the nitrogen model, per trifoliate leaf: the leaflets on one petiole are the same age and share one
-    // value, Cab = leaf.chlorophyll * (y + (1 - y) * min(1, age / leaf.chlorophyll_mature_age)) + N(0, leaf.chlorophyll_sd), with
-    // y = leaf.chlorophyll_young_fraction (young leaves paler; 1 = no age effect), plus an optional small per-leaflet jitter
-    // (leaf.chlorophyll_leaflet_sd), clamped to leaf.chlorophyll_min..max. Published as the leaf nitrogen the binned PROSPECT path
-    // reads. Draws come from each plant's own stream, so a plant's colours depend only on its site seed.
-    const bool leaf_cab_variation = cfg.f("leaf.chlorophyll_sd", 0.f) > 0.f || cfg.f("leaf.chlorophyll_young_fraction", 1.f) < 1.f;
-    if (leaf_cab_variation) {
-        if (cfg.i("leaf.nitrogen_model", 0)) {
-            helios_runtime_error("ERROR (buildCanopy): leaf chlorophyll variation and leaf.nitrogen_model both set leaf nitrogen; use one.");
-        }
-        const float cab_per_N = 100.f * cfg.f("leaf.f_photosynthetic", 0.50f) * cfg.f("leaf.N_to_Cab_coefficient", 0.40f);
-        const float cab_mature = cfg.f("leaf.chlorophyll"), young = cfg.f("leaf.chlorophyll_young_fraction", 1.f);
-        const float mature_age = std::max(cfg.f("leaf.chlorophyll_mature_age", 8.f), 1e-3f);
-        const float leaf_sd = cfg.f("leaf.chlorophyll_sd", 0.f), leaflet_sd = cfg.f("leaf.chlorophyll_leaflet_sd", 0.f);
-        const float cab_min = cfg.f("leaf.chlorophyll_min", 20.f), cab_max = cfg.f("leaf.chlorophyll_max", 100.f);
-        std::vector<float> drawn;
-        for (size_t k = 0; k < plantIDs.size(); k++) {
-            const unsigned stream = k < sites.size() ? sites[k].seed : unsigned(k + 1);
-            std::mt19937 rng(hashSeed(stream, 7));
-            std::normal_distribution<float> unit(0.f, 1.f);
-            for (uint shootID: plantarchitecture.getAllShootIDs(plantIDs[k])) {
-                if (plantarchitecture.isShootPruned(plantIDs[k], shootID)) continue;
-                for (const auto &phytomer: plantarchitecture.getPlantShoot(plantIDs[k], shootID)->phytomers) {
-                    const float age_factor = young + (1.f - young) * std::min(1.f, phytomer->age / mature_age);
-                    for (const std::vector<uint> &leaflets: phytomer->leaf_objIDs) {
-                        const float leaf_cab = cab_mature * age_factor + leaf_sd * unit(rng);
-                        for (uint objID: leaflets) {
-                            if (!context.doesObjectExist(objID)) continue;
-                            const float value = std::clamp(leaf_cab + leaflet_sd * unit(rng), cab_min, cab_max);
-                            context.setObjectData(objID, "leaf_nitrogen_gN_m2", value / cab_per_N);
-                            drawn.push_back(value);
-                        }
-                    }
-                }
-            }
-        }
-        std::sort(drawn.begin(), drawn.end());
-        auto q = [&](float f) { return drawn.empty() ? 0.f : drawn[size_t(f * float(drawn.size() - 1))]; };
-        std::cout << "DIAG chlorophyll_per_leaf n=" << drawn.size() << " Cab_p10=" << q(0.1f) << " Cab_p50=" << q(0.5f) << " Cab_p90=" << q(0.9f) << std::endl;
-    }
+    assignLeafChlorophyll(cfg, context, plantarchitecture, plantIDs, sites);
 
     // Leaf angle distribution and its measurement, for any configuration (this used to sit inside
     // the nitrogen block and was silently skipped whenever that model was off).
@@ -710,6 +925,14 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
         std::cout << std::endl;
     }
 
+
+    // diag.write_plant_xml <prefix>: every site's plant as a plant-structure XML (<prefix>_s<k>.xml), written here because the
+    // per-plant yaw below turns the geometry without touching the plant's own state, which is what the XML records; and a
+    // canopy.plant_xml list (<prefix>_list.txt, after the yaw is known) that puts each plant back at its yaw and seed.
+    const std::string xml_prefix = cfg.s("diag.write_plant_xml", "");
+    for (size_t k = 0; k < sites.size() && !xml_prefix.empty(); k++) {
+        plantarchitecture.writePlantStructureXML(sites[k].plantID, xml_prefix + "_s" + std::to_string(k) + ".xml");
+    }
 
     // Give each plant a random azimuth about its own base. Nothing in the library randomizes a
     // plant's overall orientation -- ShootParameters::base_yaw is a per-shoot branching angle, and
@@ -808,6 +1031,14 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
             }
         }
     }
+    if (!xml_prefix.empty()) {
+        std::ofstream list(xml_prefix + "_list.txt");
+        list << "# path yaw_deg seed\n";
+        for (size_t k = 0; k < sites.size(); k++) {
+            list << xml_prefix << "_s" << k << ".xml " << std::setprecision(9) << rad2deg(std::max(sites[k].yaw_rad, 0.f)) << " " << sites[k].seed << "\n";
+        }
+        std::cout << "DIAG write_plant_xml plants=" << sites.size() << " list=" << xml_prefix << "_list.txt" << std::endl;
+    }
     // These diagnostics describe finished geometry, so they sit after the per-plant yaw rotation above: run
     // before it they reported each plant's leaves in its pre-rotation frame, which matches nothing that is
     // drawn or rendered. Relative measurements within a plant (a leaflet against its own petiole) are
@@ -822,6 +1053,9 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     // the 06-20 Plot286 twin measured 61.8 mm where that method reported 46 mm.
     //
     // Object IDs and bases are paired by index as in print_leaf_directions above.
+    dumpLeafTransforms(cfg, context, plantarchitecture, plantIDs);
+    dumpLeafVertices(cfg, context, plantarchitecture, plantIDs);
+    dumpLeafUVFit(cfg, context, plantarchitecture, plantIDs);
     if (cfg.has("diag.leafruler")) {
         const std::string ruler_path = cfg.s("diag.leafruler");
         std::ofstream ruler(ruler_path);
@@ -1023,6 +1257,126 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
         std::cout << "DIAG stalkdump file=" << cfg.s("diag.stalkdump") << std::endl;
     }
 
+    // diag.flowerdump <path>: every reproductive object (peduncle, closed flower, open flower, fruit) with the phytomer it
+    // belongs to -- (shoot, node) as diag.petiolecensus numbers them -- so a twin plant's flowers can be carried into
+    // another representation where the twin drew them. Written after the per-plant yaw, like leafruler and stalkdump.
+    //   peduncle   its centerline: the phytomer's stored peduncle vertices, which the yaw above did not touch (it turns
+    //              objects, not plant state), turned here by the site's yaw about the plant base; check_mm is the
+    //              largest distance from a turned centerline point to the tube's own nearest vertex, i.e. about the
+    //              tube radius when the two agree.
+    //   inflorescence  the object's transformation matrix after scale, rotation, placement and yaw (its rotation and
+    //              scale are the organ's; its origin is NOT the attachment point when the prototype object itself
+    //              carried a translation), the world centroid of its vertices, and the attachment point the phytomer
+    //              stored (FloralBud::inflorescence_bases: the point on the peduncle), turned by the site's yaw.
+    // Line formats (world metres):
+    //   PED plant shoot node petiole bud terminal state objID radius_m n_pts x0 y0 z0 ... check_mm
+    //   INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33
+    if (cfg.has("diag.flowerdump")) {
+        std::ofstream fd(cfg.s("diag.flowerdump"));
+        if (!fd) {
+            helios_runtime_error("ERROR: cannot open diag.flowerdump file " + cfg.s("diag.flowerdump") + " for writing.");
+        }
+        fd << std::setprecision(9);
+        fd << "# PED plant shoot node petiole bud terminal state objID radius_m n_pts x y z ... check_mm\n";
+        fd << "# INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33 cx cy cz attach_ok ax ay az\n";
+        std::map<uint, float> yaw_of_plant;
+        for (const Site &s: sites) yaw_of_plant[s.plantID] = (s.yaw_rad > 0.f) ? s.yaw_rad : 0.f;
+        size_t n_ped = 0, n_inf = 0;
+        size_t bud_states[6] = {0, 0, 0, 0, 0, 0};   // every floral bud of a live shoot, by Helios BudState
+        float worst_check_mm = 0.f;
+        for (size_t k = 0; k < plantIDs.size(); k++) {
+            const uint pid = plantIDs[k];
+            const float yaw = yaw_of_plant.count(pid) ? yaw_of_plant[pid] : 0.f;
+            const vec3 pbase = plantarchitecture.getPlantBasePosition(pid);
+            const float cy = std::cos(yaw), sy = std::sin(yaw);
+            auto turn = [&](const vec3 &v) {
+                const vec3 a = v - pbase;
+                return pbase + make_vec3(a.x * cy - a.y * sy, a.x * sy + a.y * cy, a.z);
+            };
+            for (uint shootID: plantarchitecture.getAllShootIDs(pid)) {
+                if (plantarchitecture.isShootPruned(pid, shootID)) continue;
+                const auto shoot = plantarchitecture.getPlantShoot(pid, shootID);
+                for (size_t n = 0; n < shoot->phytomers.size(); n++) {
+                    const auto &phytomer = shoot->phytomers[n];
+                    for (const auto &petiole_buds: phytomer->floral_buds) {
+                        for (const FloralBud &fb: petiole_buds) {
+                            if (int(fb.state) >= 0 && int(fb.state) < 6) bud_states[int(fb.state)]++;
+                            int ped_obj = -1;
+                            for (uint objID: fb.peduncle_objIDs) {
+                                if (!context.doesObjectExist(objID)) continue;
+                                ped_obj = int(objID);
+                                std::vector<vec3> line;
+                                if (fb.parent_index < phytomer->peduncle_vertices.size() && fb.bud_index < phytomer->peduncle_vertices[fb.parent_index].size()) {
+                                    line = phytomer->peduncle_vertices[fb.parent_index][fb.bud_index];
+                                }
+                                float radius = 0.f;
+                                if (fb.parent_index < phytomer->peduncle_radii.size() && fb.bud_index < phytomer->peduncle_radii[fb.parent_index].size() &&
+                                    !phytomer->peduncle_radii[fb.parent_index][fb.bud_index].empty()) {
+                                    radius = phytomer->peduncle_radii[fb.parent_index][fb.bud_index].front();
+                                }
+                                std::vector<vec3> verts;
+                                for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
+                                    const std::vector<vec3> v = context.getPrimitiveVertices(UUID);
+                                    verts.insert(verts.end(), v.begin(), v.end());
+                                }
+                                float check_mm = -1.f;
+                                for (vec3 &p: line) {
+                                    p = turn(p);
+                                    float nearest = 1e9f;
+                                    for (const vec3 &v: verts) nearest = std::min(nearest, (v - p).magnitude());
+                                    if (nearest < 1e8f) check_mm = std::max(check_mm, nearest * 1000.f);
+                                }
+                                worst_check_mm = std::max(worst_check_mm, check_mm);
+                                fd << "PED " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
+                                   << " " << objID << " " << radius << " " << line.size();
+                                for (const vec3 &p: line) fd << " " << p.x << " " << p.y << " " << p.z;
+                                fd << " " << check_mm << "\n";
+                                n_ped++;
+                            }
+                            for (uint objID: fb.inflorescence_objIDs) {
+                                if (!context.doesObjectExist(objID)) continue;
+                                const char *kind = context.doesObjectDataExist(objID, "fruitID") ? "fruit"
+                                                 : context.doesObjectDataExist(objID, "openflowerID") ? "flower_open"
+                                                 : context.doesObjectDataExist(objID, "closedflowerID") ? "flower_closed"
+                                                 : (fb.state == BUD_FRUITING ? "fruit" : fb.state == BUD_FLOWER_OPEN ? "flower_open" : "flower_closed");
+                                const int senescent = context.doesObjectDataExist(objID, "senescent_flower") ? 1 : 0;
+                                size_t nv = 0;
+                                vec3 vsum(0.f, 0.f, 0.f);
+                                for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
+                                    for (const vec3 &v: context.getPrimitiveVertices(UUID)) {
+                                        vsum = vsum + v;
+                                        nv++;
+                                    }
+                                }
+                                const vec3 centroid = nv ? vsum / float(nv) : vsum;
+                                float T[16];
+                                context.getObjectTransformationMatrix(objID, T);
+                                // inflorescence_bases holds where this organ was attached (the peduncle point), turned by the yaw
+                                vec3 attach(0.f, 0.f, 0.f);
+                                int attach_ok = 0;
+                                for (size_t q = 0; q < fb.inflorescence_objIDs.size() && q < fb.inflorescence_bases.size(); q++) {
+                                    if (fb.inflorescence_objIDs[q] == objID) {
+                                        attach = turn(fb.inflorescence_bases[q]);
+                                        attach_ok = 1;
+                                    }
+                                }
+                                fd << "INF " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
+                                   << " " << objID << " " << kind << " " << senescent << " " << ped_obj << " " << nv;
+                                for (float t: T) fd << " " << t;
+                                fd << " " << centroid.x << " " << centroid.y << " " << centroid.z << " " << attach_ok << " " << attach.x << " " << attach.y << " " << attach.z;
+                                fd << "\n";
+                                n_inf++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << "DIAG flowerdump flowerdump_peduncles=" << n_ped << " flowerdump_inflorescences=" << n_inf << " flowerdump_worst_check_mm=" << worst_check_mm
+                  << " flowerdump_bud_states=" << bud_states[0] << "," << bud_states[1] << "," << bud_states[2] << "," << bud_states[3]
+                  << "," << bud_states[4] << "," << bud_states[5] << " flowerdump_file=" << cfg.s("diag.flowerdump") << std::endl;
+    }
+
     // diag.petiolecensus 1: every petiole in the scene with the leaflets that should be on it, to account for the
     // bare stalks in the renders. A petiole counts as bare when none of the leaf objects the phytomer lists for it
     // still exist, and as stunted when they exist but carry almost no area. Reported against the phytomer's age and
@@ -1132,15 +1486,8 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     }
 
 
-    // Tag every primitive with the index of its site, so that a per-pixel map of it can be written
-    // by either the ray tracer or the label rasterizer, and print the sites so the fitting code can
-    // name each plant in the scene by (position, yaw, age, seed) and reproduce it.
-    for (size_t k = 0; k < sites.size(); k++) {
-        const Site &s = sites[k];
-        context.setPrimitiveData(plantarchitecture.getAllPlantUUIDs(s.plantID), "siteIndex", int(k + 1));
-        std::cout << "SITE " << k << " " << std::setprecision(9) << s.position.x << " " << s.position.y << " "
-                  << rad2deg(s.yaw_rad) << " " << s.age_days << " " << s.seed << " " << s.plantID << std::endl;
-    }
+    tagSites(context, plantarchitecture, sites);
+    dumpLeaves(cfg, context, plantarchitecture, plantIDs);
     if (sites_out != nullptr) {
         *sites_out = sites;
     }
@@ -1159,6 +1506,88 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     }
 
     return plantIDs;
+}
+
+// canopy.plant_xml <list>: the canopy read from plant-structure XML files instead of grown, so that plants made
+// elsewhere (a refined reconstruction, or a grown plant written out by diag.write_plant_xml) go through exactly
+// the raster and render paths a grown canopy does. One line per file,
+//     path [yaw_deg [seed]]
+// each file's plants standing where its <base_position> says. yaw_deg turns them about that base as buildCanopy
+// turns a site (0 when the file already carries its orientation); seed names the stream the leaf chlorophyll
+// draw uses, so a plant written out and read back keeps its leaf colours. Nothing is grown and no leaf angle is
+// re-imposed: the file is the geometry.
+std::vector<uint> loadCanopyXML(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture,
+                                std::vector<Site> *sites_out = nullptr) {
+    plantarchitecture.optionalOutputObjectData("plantID");
+    plantarchitecture.optionalOutputObjectData("openflowerID");
+    plantarchitecture.optionalOutputObjectData("closedflowerID");
+    plantarchitecture.optionalOutputObjectData("fruitID");
+    configurePlantModel(cfg, plantarchitecture);
+
+    const std::string list_file = cfg.s("canopy.plant_xml");
+    std::ifstream f(list_file);
+    if (!f) {
+        helios_runtime_error("ERROR (loadCanopyXML): cannot open canopy.plant_xml " + list_file);
+    }
+    std::vector<Site> sites;
+    std::string line;
+    while (std::getline(f, line)) {
+        const size_t c = line.find('#');
+        if (c != std::string::npos) line = line.substr(0, c);
+        std::istringstream ss(line);
+        std::string path;
+        if (!(ss >> path)) continue;
+        float yaw_deg = 0.f;
+        unsigned seed = unsigned(sites.size() + 1);
+        ss >> yaw_deg >> seed;
+        for (uint pid: plantarchitecture.readPlantStructureXML(path, true)) {
+            Site s;
+            s.plantID = pid;
+            s.position = plantarchitecture.getPlantBasePosition(pid);
+            s.yaw_rad = deg2rad(yaw_deg);
+            s.age_days = plantarchitecture.getPlantAge(pid);
+            s.seed = seed;
+            if (s.yaw_rad != 0.f) {
+                // Objects, not primitives: a primitive-level transform is discarded for the tube organs (see buildCanopy).
+                const std::vector<uint> objects = plantarchitecture.getAllPlantObjectIDs(pid);
+                context.rotateObject(objects, s.yaw_rad, s.position, make_vec3(0, 0, 1));
+                std::set<uint> covered;
+                for (uint objID: objects) {
+                    for (uint u: context.getObjectPrimitiveUUIDs(objID)) covered.insert(u);
+                }
+                std::vector<uint> loose;
+                for (uint u: plantarchitecture.getAllPlantUUIDs(pid)) {
+                    if (!covered.count(u)) loose.push_back(u);
+                }
+                if (!loose.empty()) context.rotatePrimitive(loose, s.yaw_rad, s.position, make_vec3(0, 0, 1));
+            }
+            sites.push_back(s);
+        }
+    }
+    std::vector<uint> plantIDs;
+    for (const Site &s: sites) plantIDs.push_back(s.plantID);
+    std::cout << "DIAG plant_xml=" << list_file << " plants=" << plantIDs.size() << std::endl;
+
+    assignLeafChlorophyll(cfg, context, plantarchitecture, plantIDs, sites);
+    tagSites(context, plantarchitecture, sites);
+    dumpLeaves(cfg, context, plantarchitecture, plantIDs);
+    dumpLeafTransforms(cfg, context, plantarchitecture, plantIDs);
+    dumpLeafVertices(cfg, context, plantarchitecture, plantIDs);
+    dumpLeafUVFit(cfg, context, plantarchitecture, plantIDs);
+    if (sites_out != nullptr) {
+        *sites_out = sites;
+    }
+    std::cout << context.getPrimitiveCount() * 1e-6 << "M primitives" << std::endl;
+    return plantIDs;
+}
+
+//! The canopy a pass draws: read from canopy.plant_xml when it is set, grown by buildCanopy() otherwise.
+std::vector<uint> makeCanopy(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, unsigned scene_seed,
+                             std::vector<Site> *sites_out = nullptr) {
+    if (cfg.has("canopy.plant_xml")) {
+        return loadCanopyXML(cfg, context, plantarchitecture, sites_out);
+    }
+    return buildCanopy(cfg, context, plantarchitecture, scene_seed, sites_out);
 }
 
 // ---------------------------------------------------------------- geometry ---
@@ -1447,7 +1876,7 @@ int raster(const Config &cfg, unsigned seed) {
     PlantArchitecture plantarchitecture(&context);
     const auto t0 = std::chrono::steady_clock::now();
     std::vector<Site> sites;
-    const std::vector<uint> plantIDs = buildCanopy(cfg, context, plantarchitecture, seed, &sites);
+    const std::vector<uint> plantIDs = makeCanopy(cfg, context, plantarchitecture, seed, &sites);
     const auto t1 = std::chrono::steady_clock::now();
 
     RasterCamera cam;
@@ -1676,7 +2105,7 @@ int render(const Config &cfg, unsigned seed) {
     // FLAT response, which invalidates the colour calibration -- the CCM and the
     // fitted leaf pigments were both solved against the real Basler curves.
     context.loadXML("plugins/radiation/spectral_data/camera_spectral_library.xml", true);
-    const std::vector<uint> plantIDs = buildCanopy(cfg, context, plantarchitecture, seed);
+    const std::vector<uint> plantIDs = makeCanopy(cfg, context, plantarchitecture, seed);
 
     // --- leaf optics from PROSPECT -----------------------------------------
     // Replaces the LI-COR measured library: its reflectance carries a ~0.05
