@@ -1,0 +1,6 @@
+<!-- Fitted against scene foliage/soil colour, not the colour board. Excludes foliage and soil L* from the objective: the first is set by exposure and the second is a soil reflectance error a colour matrix must not absorb. -->
+<ColorCorrectionMatrix camera_label="camA" matrix_type="3x3">
+  <row>1.182086 -0.560709 0.145156</row>
+  <row>-0.295404 1.558138 -0.412099</row>
+  <row>0.265087 -1.403966 2.143740</row>
+</ColorCorrectionMatrix>

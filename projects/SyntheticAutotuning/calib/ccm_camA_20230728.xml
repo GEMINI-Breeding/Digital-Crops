@@ -1,0 +1,6 @@
+<!-- Basler acA2500-20gc, T4 rover camA. Solved from a Datacolor SpyderCHECKR 24 frame captured 2023-07-28 16:45 UTC, 7.6 min before the 2023-07-28 imaging session. 18/24 patches usable (6 clipped); fitted tone-curve gamma 2.00; residual 19.68 DN RMS vs 33.48 for per-channel gain alone (1.70x better). Applies downstream of Helios auto white balance. -->
+<ColorCorrectionMatrix camera_label="camA" matrix_type="3x3">
+  <row>1.327907 -0.556237 0.145156</row>
+  <row>-0.210308 1.575028 -0.412002</row>
+  <row>0.201699 -1.419851 2.144966</row>
+</ColorCorrectionMatrix>
