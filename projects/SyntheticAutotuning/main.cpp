@@ -1950,6 +1950,13 @@ void writeRaw(const std::string &path, const std::vector<T> &data, size_t offset
     f.write(reinterpret_cast<const char *>(data.data() + offset), std::streamsize(count * sizeof(T)));
 }
 
+// I/O addition (2026-09-29): where the Syn2Real_cowpea assets are (soil spectra, T4 rover body and its reflectance).
+// Upstream hard-codes "../../Syn2Real_cowpea", relative to the working directory (<project>/build), which is the
+// default here too. paths.syn2real_dir moves the whole folder; paths.soil_spec_xml names the soil spectra alone.
+static std::string syn2realPath(const Config &cfg, const std::string &rel) {
+    return cfg.s("paths.syn2real_dir", "../../Syn2Real_cowpea") + "/" + rel;
+}
+
 int raster(const Config &cfg, unsigned seed) {
 
     Context context;
@@ -1984,7 +1991,7 @@ int raster(const Config &cfg, unsigned seed) {
     }
     // The rover body, when the real frame carries it: 1.1M primitives, so opt in.
     if (cfg.i("raster.load_rover", 0)) {
-        const std::vector<uint> rover = context.loadOBJ("../../Syn2Real_cowpea/obj/T4rover_highres.obj", make_vec3(0, 0, -0.05), 0, nullrotation, RGB::black);
+        const std::vector<uint> rover = context.loadOBJ(syn2realPath(cfg, "obj/T4rover_highres.obj").c_str(), make_vec3(0, 0, -0.05), 0, nullrotation, RGB::black);
         RasterTag tag;
         tag.cls = 6;
         for (uint u: rover) rasterPrimitive(maps, cam, context, u, tag);
@@ -2342,7 +2349,7 @@ int render(const Config &cfg, unsigned seed) {
     std::vector<uint> ground = context.addTile(make_vec3(0, 0, -0.01), ground_size, nullrotation,
                                                ground_div, make_RGBcolor(0.45, 0.36, 0.28));
     context.setPrimitiveData(ground, "twosided_flag", uint(0));
-    context.loadXML("../../Syn2Real_cowpea/xml/soil_spec.xml", true);
+    context.loadXML(cfg.s("paths.soil_spec_xml", syn2realPath(cfg, "xml/soil_spec.xml")).c_str(), true);
     // Which of the four library soils. Drawn per scene for the distribution task; a twin of one
     // frame names it (soil.spectrum_index 0-3) so the soil is a fitted choice, not a lottery.
     const int soil_index = cfg.i("soil.spectrum_index", -1);
@@ -2429,8 +2436,8 @@ int render(const Config &cfg, unsigned seed) {
     // than a shrouded LED rig.
     std::vector<uint> UUIDs_T4;
     if (cfg.i("scene.load_rover", 1)) {
-        context.loadXML("../../Syn2Real_cowpea/T4_body_reflectance.xml", true);
-        UUIDs_T4 = context.loadOBJ("../../Syn2Real_cowpea/obj/T4rover_highres.obj",
+        context.loadXML(syn2realPath(cfg, "T4_body_reflectance.xml").c_str(), true);
+        UUIDs_T4 = context.loadOBJ(syn2realPath(cfg, "obj/T4rover_highres.obj").c_str(),
                                    make_vec3(0, 0, -0.05), 0, nullrotation, RGB::black);
         // Rover reflectance scales. The body sits within a metre of the LED rig and renders far
         // brighter than the real rails: measured on the 06-20 frame, rendered rover pixels were
