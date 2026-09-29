@@ -20,3 +20,9 @@ set( PLUGINS "radiation;plantarchitecture;visualizer;leafoptics;syntheticannotat
 
 #-------- DO NOT MODIFY ---------#
 include( "${BASE_DIRECTORY}/core/CMake_project.cmake" )
+
+# Digital-Crops: the twin's high-resolution cowpea flower prototypes (main.cpp loads
+# plugins/plantarchitecture/assets/obj/CowpeaFlower_{closed,open,senescent}_highres.obj) are in the upstream
+# Helios tree the twin was written against but not in libs/Helios; they are kept in assets/ and copied into the
+# build's plug-in assets.
+file( COPY "${CMAKE_CURRENT_SOURCE_DIR}/assets/plantarchitecture/obj/" DESTINATION "${CMAKE_BINARY_DIR}/plugins/plantarchitecture/assets/obj" )
