@@ -43,7 +43,8 @@ The render path loads `xml/soil_spec.xml` (soil spectra) and, when the rover bod
 `T4_body_reflectance.xml` and `obj/T4rover_highres.obj` from a `Syn2Real_cowpea` folder, upstream at
 `../../Syn2Real_cowpea` relative to the working directory. They are not part of this repository. Today they are read
 from `/group/bnbaileygrp/bnbailey/Helios/projects/Syn2Real_cowpea` (image-to-l-system's `twin_render.py` links it into
-its run tree) and `image-to-l-system/scratch/Syn2Real_cowpea/xml/soil_spec.xml`. The proposed permanent home is
+its run tree). Use that copy: `image-to-l-system/scratch/Syn2Real_cowpea/xml/soil_spec.xml` differs from it and does not
+reproduce the twin's renders. The proposed permanent home is
 `image-to-l-system/dataset/twin_assets/Syn2Real_cowpea/`; point the binary at it with
 `paths.syn2real_dir /abs/path/to/dataset/twin_assets/Syn2Real_cowpea` (or `paths.soil_spec_xml` for the soil file
 alone). Until then the default relative path applies.
@@ -51,4 +52,9 @@ alone). Until then the default relative path applies.
 ## Parity check
 
 A grown render of the Plot201 twin (`twin_work/2023-06-20_Plot201-MAGIC262_rate2`, its layout and render overrides)
-must reproduce the upstream binary's own `render_soil` output: identical site map (every plant IoU 1.000).
+must reproduce the upstream binary's own `render_soil` output: identical site map (every plant IoU 1.000), RGB mean
+absolute difference 0.66 of 255 or less. The binary runs from a directory laid out as
+`<tree>/SyntheticAutotuning/build` (with `plugins/`), `<tree>/SyntheticAutotuning/{calib,config}` and
+`<tree>/Syn2Real_cowpea`; image-to-l-system's `twin_render.ensure_runtree()` builds it, and `TWIN_RENDER_BIN` /
+`TWIN_RENDER_RUNTREE` point that wrapper at this build. The procedure and scripts are image-to-l-system
+`scratch/20260928_twin_render/parity_run.py` (steps A, B, Bp) and `parity_compare.py`.
