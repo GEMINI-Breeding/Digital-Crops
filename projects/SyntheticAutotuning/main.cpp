@@ -574,6 +574,130 @@ void dumpLeafUVFit(const Config &cfg, Context &context, PlantArchitecture &plant
     std::cout << "DIAG leafuvfit leaves=" << written << " skipped=" << skipped << " file=" << cfg.s("diag.leafuvfit") << std::endl;
 }
 
+// diag.flowerdump <path>: every reproductive object (peduncle, closed flower, open flower, fruit) with the phytomer it
+// belongs to -- (shoot, node) as diag.petiolecensus numbers them -- so a twin plant's flowers can be carried into
+// another representation where the twin drew them. Called after the per-plant yaw, like leafruler and stalkdump, by
+// the grown canopy (buildCanopy) and by the XML-loaded one (loadCanopyXML), so a plant read back from XML can be
+// compared organ by organ with the plant it was written from.
+//   peduncle   its centerline: the phytomer's stored peduncle vertices, which the yaw did not touch (it turns objects,
+//              not plant state), turned here by the site's yaw about the plant base; check_mm is the largest distance
+//              from a turned centerline point to the tube's own nearest vertex, i.e. about the tube radius when the
+//              two agree.
+//   inflorescence  the object's transformation matrix after scale, rotation, placement and yaw (its rotation and scale
+//              are the organ's; its origin is NOT the attachment point when the prototype object itself carried a
+//              translation), the world centroid of its vertices, and the attachment point the phytomer stored
+//              (FloralBud::inflorescence_bases: the point on the peduncle), turned by the site's yaw.
+// Line formats (world metres):
+//   PED plant shoot node petiole bud terminal state objID radius_m n_pts x0 y0 z0 ... check_mm
+//   INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33 cx cy cz attach_ok ax ay az
+void dumpFlowers(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, const std::vector<uint> &plantIDs,
+                 const std::vector<Site> &sites) {
+    if (!cfg.has("diag.flowerdump")) return;
+    std::ofstream fd(cfg.s("diag.flowerdump"));
+    if (!fd) {
+        helios_runtime_error("ERROR: cannot open diag.flowerdump file " + cfg.s("diag.flowerdump") + " for writing.");
+    }
+    fd << std::setprecision(9);
+    fd << "# PED plant shoot node petiole bud terminal state objID radius_m n_pts x y z ... check_mm\n";
+    fd << "# INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33 cx cy cz attach_ok ax ay az\n";
+    std::map<uint, float> yaw_of_plant;
+    for (const Site &s: sites) yaw_of_plant[s.plantID] = (s.yaw_rad > 0.f) ? s.yaw_rad : 0.f;
+    size_t n_ped = 0, n_inf = 0;
+    size_t bud_states[6] = {0, 0, 0, 0, 0, 0};   // every floral bud of a live shoot, by Helios BudState
+    float worst_check_mm = 0.f;
+    for (size_t k = 0; k < plantIDs.size(); k++) {
+        const uint pid = plantIDs[k];
+        const float yaw = yaw_of_plant.count(pid) ? yaw_of_plant[pid] : 0.f;
+        const vec3 pbase = plantarchitecture.getPlantBasePosition(pid);
+        const float cy = std::cos(yaw), sy = std::sin(yaw);
+        auto turn = [&](const vec3 &v) {
+            const vec3 a = v - pbase;
+            return pbase + make_vec3(a.x * cy - a.y * sy, a.x * sy + a.y * cy, a.z);
+        };
+        for (uint shootID: plantarchitecture.getAllShootIDs(pid)) {
+            if (plantarchitecture.isShootPruned(pid, shootID)) continue;
+            const auto shoot = plantarchitecture.getPlantShoot(pid, shootID);
+            for (size_t n = 0; n < shoot->phytomers.size(); n++) {
+                const auto &phytomer = shoot->phytomers[n];
+                for (const auto &petiole_buds: phytomer->floral_buds) {
+                    for (const FloralBud &fb: petiole_buds) {
+                        if (int(fb.state) >= 0 && int(fb.state) < 6) bud_states[int(fb.state)]++;
+                        int ped_obj = -1;
+                        for (uint objID: fb.peduncle_objIDs) {
+                            if (!context.doesObjectExist(objID)) continue;
+                            ped_obj = int(objID);
+                            std::vector<vec3> line;
+                            if (fb.parent_index < phytomer->peduncle_vertices.size() && fb.bud_index < phytomer->peduncle_vertices[fb.parent_index].size()) {
+                                line = phytomer->peduncle_vertices[fb.parent_index][fb.bud_index];
+                            }
+                            float radius = 0.f;
+                            if (fb.parent_index < phytomer->peduncle_radii.size() && fb.bud_index < phytomer->peduncle_radii[fb.parent_index].size() &&
+                                !phytomer->peduncle_radii[fb.parent_index][fb.bud_index].empty()) {
+                                radius = phytomer->peduncle_radii[fb.parent_index][fb.bud_index].front();
+                            }
+                            std::vector<vec3> verts;
+                            for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
+                                const std::vector<vec3> v = context.getPrimitiveVertices(UUID);
+                                verts.insert(verts.end(), v.begin(), v.end());
+                            }
+                            float check_mm = -1.f;
+                            for (vec3 &p: line) {
+                                p = turn(p);
+                                float nearest = 1e9f;
+                                for (const vec3 &v: verts) nearest = std::min(nearest, (v - p).magnitude());
+                                if (nearest < 1e8f) check_mm = std::max(check_mm, nearest * 1000.f);
+                            }
+                            worst_check_mm = std::max(worst_check_mm, check_mm);
+                            fd << "PED " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
+                               << " " << objID << " " << radius << " " << line.size();
+                            for (const vec3 &p: line) fd << " " << p.x << " " << p.y << " " << p.z;
+                            fd << " " << check_mm << "\n";
+                            n_ped++;
+                        }
+                        for (uint objID: fb.inflorescence_objIDs) {
+                            if (!context.doesObjectExist(objID)) continue;
+                            const char *kind = context.doesObjectDataExist(objID, "fruitID") ? "fruit"
+                                             : context.doesObjectDataExist(objID, "openflowerID") ? "flower_open"
+                                             : context.doesObjectDataExist(objID, "closedflowerID") ? "flower_closed"
+                                             : (fb.state == BUD_FRUITING ? "fruit" : fb.state == BUD_FLOWER_OPEN ? "flower_open" : "flower_closed");
+                            const int senescent = context.doesObjectDataExist(objID, "senescent_flower") ? 1 : 0;
+                            size_t nv = 0;
+                            vec3 vsum(0.f, 0.f, 0.f);
+                            for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
+                                for (const vec3 &v: context.getPrimitiveVertices(UUID)) {
+                                    vsum = vsum + v;
+                                    nv++;
+                                }
+                            }
+                            const vec3 centroid = nv ? vsum / float(nv) : vsum;
+                            float T[16];
+                            context.getObjectTransformationMatrix(objID, T);
+                            // inflorescence_bases holds where this organ was attached (the peduncle point), turned by the yaw
+                            vec3 attach(0.f, 0.f, 0.f);
+                            int attach_ok = 0;
+                            for (size_t q = 0; q < fb.inflorescence_objIDs.size() && q < fb.inflorescence_bases.size(); q++) {
+                                if (fb.inflorescence_objIDs[q] == objID) {
+                                    attach = turn(fb.inflorescence_bases[q]);
+                                    attach_ok = 1;
+                                }
+                            }
+                            fd << "INF " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
+                               << " " << objID << " " << kind << " " << senescent << " " << ped_obj << " " << nv;
+                            for (float t: T) fd << " " << t;
+                            fd << " " << centroid.x << " " << centroid.y << " " << centroid.z << " " << attach_ok << " " << attach.x << " " << attach.y << " " << attach.z;
+                            fd << "\n";
+                            n_inf++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "DIAG flowerdump flowerdump_peduncles=" << n_ped << " flowerdump_inflorescences=" << n_inf << " flowerdump_worst_check_mm=" << worst_check_mm
+              << " flowerdump_bud_states=" << bud_states[0] << "," << bud_states[1] << "," << bud_states[2] << "," << bud_states[3]
+              << "," << bud_states[4] << "," << bud_states[5] << " flowerdump_file=" << cfg.s("diag.flowerdump") << std::endl;
+}
+
 std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, unsigned scene_seed,
                               std::vector<Site> *sites_out = nullptr) {
 
@@ -1257,125 +1381,8 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
         std::cout << "DIAG stalkdump file=" << cfg.s("diag.stalkdump") << std::endl;
     }
 
-    // diag.flowerdump <path>: every reproductive object (peduncle, closed flower, open flower, fruit) with the phytomer it
-    // belongs to -- (shoot, node) as diag.petiolecensus numbers them -- so a twin plant's flowers can be carried into
-    // another representation where the twin drew them. Written after the per-plant yaw, like leafruler and stalkdump.
-    //   peduncle   its centerline: the phytomer's stored peduncle vertices, which the yaw above did not touch (it turns
-    //              objects, not plant state), turned here by the site's yaw about the plant base; check_mm is the
-    //              largest distance from a turned centerline point to the tube's own nearest vertex, i.e. about the
-    //              tube radius when the two agree.
-    //   inflorescence  the object's transformation matrix after scale, rotation, placement and yaw (its rotation and
-    //              scale are the organ's; its origin is NOT the attachment point when the prototype object itself
-    //              carried a translation), the world centroid of its vertices, and the attachment point the phytomer
-    //              stored (FloralBud::inflorescence_bases: the point on the peduncle), turned by the site's yaw.
-    // Line formats (world metres):
-    //   PED plant shoot node petiole bud terminal state objID radius_m n_pts x0 y0 z0 ... check_mm
-    //   INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33
-    if (cfg.has("diag.flowerdump")) {
-        std::ofstream fd(cfg.s("diag.flowerdump"));
-        if (!fd) {
-            helios_runtime_error("ERROR: cannot open diag.flowerdump file " + cfg.s("diag.flowerdump") + " for writing.");
-        }
-        fd << std::setprecision(9);
-        fd << "# PED plant shoot node petiole bud terminal state objID radius_m n_pts x y z ... check_mm\n";
-        fd << "# INF plant shoot node petiole bud terminal state objID kind senescent peduncle_objID n_verts T00..T33 cx cy cz attach_ok ax ay az\n";
-        std::map<uint, float> yaw_of_plant;
-        for (const Site &s: sites) yaw_of_plant[s.plantID] = (s.yaw_rad > 0.f) ? s.yaw_rad : 0.f;
-        size_t n_ped = 0, n_inf = 0;
-        size_t bud_states[6] = {0, 0, 0, 0, 0, 0};   // every floral bud of a live shoot, by Helios BudState
-        float worst_check_mm = 0.f;
-        for (size_t k = 0; k < plantIDs.size(); k++) {
-            const uint pid = plantIDs[k];
-            const float yaw = yaw_of_plant.count(pid) ? yaw_of_plant[pid] : 0.f;
-            const vec3 pbase = plantarchitecture.getPlantBasePosition(pid);
-            const float cy = std::cos(yaw), sy = std::sin(yaw);
-            auto turn = [&](const vec3 &v) {
-                const vec3 a = v - pbase;
-                return pbase + make_vec3(a.x * cy - a.y * sy, a.x * sy + a.y * cy, a.z);
-            };
-            for (uint shootID: plantarchitecture.getAllShootIDs(pid)) {
-                if (plantarchitecture.isShootPruned(pid, shootID)) continue;
-                const auto shoot = plantarchitecture.getPlantShoot(pid, shootID);
-                for (size_t n = 0; n < shoot->phytomers.size(); n++) {
-                    const auto &phytomer = shoot->phytomers[n];
-                    for (const auto &petiole_buds: phytomer->floral_buds) {
-                        for (const FloralBud &fb: petiole_buds) {
-                            if (int(fb.state) >= 0 && int(fb.state) < 6) bud_states[int(fb.state)]++;
-                            int ped_obj = -1;
-                            for (uint objID: fb.peduncle_objIDs) {
-                                if (!context.doesObjectExist(objID)) continue;
-                                ped_obj = int(objID);
-                                std::vector<vec3> line;
-                                if (fb.parent_index < phytomer->peduncle_vertices.size() && fb.bud_index < phytomer->peduncle_vertices[fb.parent_index].size()) {
-                                    line = phytomer->peduncle_vertices[fb.parent_index][fb.bud_index];
-                                }
-                                float radius = 0.f;
-                                if (fb.parent_index < phytomer->peduncle_radii.size() && fb.bud_index < phytomer->peduncle_radii[fb.parent_index].size() &&
-                                    !phytomer->peduncle_radii[fb.parent_index][fb.bud_index].empty()) {
-                                    radius = phytomer->peduncle_radii[fb.parent_index][fb.bud_index].front();
-                                }
-                                std::vector<vec3> verts;
-                                for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
-                                    const std::vector<vec3> v = context.getPrimitiveVertices(UUID);
-                                    verts.insert(verts.end(), v.begin(), v.end());
-                                }
-                                float check_mm = -1.f;
-                                for (vec3 &p: line) {
-                                    p = turn(p);
-                                    float nearest = 1e9f;
-                                    for (const vec3 &v: verts) nearest = std::min(nearest, (v - p).magnitude());
-                                    if (nearest < 1e8f) check_mm = std::max(check_mm, nearest * 1000.f);
-                                }
-                                worst_check_mm = std::max(worst_check_mm, check_mm);
-                                fd << "PED " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
-                                   << " " << objID << " " << radius << " " << line.size();
-                                for (const vec3 &p: line) fd << " " << p.x << " " << p.y << " " << p.z;
-                                fd << " " << check_mm << "\n";
-                                n_ped++;
-                            }
-                            for (uint objID: fb.inflorescence_objIDs) {
-                                if (!context.doesObjectExist(objID)) continue;
-                                const char *kind = context.doesObjectDataExist(objID, "fruitID") ? "fruit"
-                                                 : context.doesObjectDataExist(objID, "openflowerID") ? "flower_open"
-                                                 : context.doesObjectDataExist(objID, "closedflowerID") ? "flower_closed"
-                                                 : (fb.state == BUD_FRUITING ? "fruit" : fb.state == BUD_FLOWER_OPEN ? "flower_open" : "flower_closed");
-                                const int senescent = context.doesObjectDataExist(objID, "senescent_flower") ? 1 : 0;
-                                size_t nv = 0;
-                                vec3 vsum(0.f, 0.f, 0.f);
-                                for (uint UUID: context.getObjectPrimitiveUUIDs(objID)) {
-                                    for (const vec3 &v: context.getPrimitiveVertices(UUID)) {
-                                        vsum = vsum + v;
-                                        nv++;
-                                    }
-                                }
-                                const vec3 centroid = nv ? vsum / float(nv) : vsum;
-                                float T[16];
-                                context.getObjectTransformationMatrix(objID, T);
-                                // inflorescence_bases holds where this organ was attached (the peduncle point), turned by the yaw
-                                vec3 attach(0.f, 0.f, 0.f);
-                                int attach_ok = 0;
-                                for (size_t q = 0; q < fb.inflorescence_objIDs.size() && q < fb.inflorescence_bases.size(); q++) {
-                                    if (fb.inflorescence_objIDs[q] == objID) {
-                                        attach = turn(fb.inflorescence_bases[q]);
-                                        attach_ok = 1;
-                                    }
-                                }
-                                fd << "INF " << k << " " << shootID << " " << n << " " << fb.parent_index << " " << fb.bud_index << " " << int(fb.isterminal) << " " << int(fb.state)
-                                   << " " << objID << " " << kind << " " << senescent << " " << ped_obj << " " << nv;
-                                for (float t: T) fd << " " << t;
-                                fd << " " << centroid.x << " " << centroid.y << " " << centroid.z << " " << attach_ok << " " << attach.x << " " << attach.y << " " << attach.z;
-                                fd << "\n";
-                                n_inf++;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        std::cout << "DIAG flowerdump flowerdump_peduncles=" << n_ped << " flowerdump_inflorescences=" << n_inf << " flowerdump_worst_check_mm=" << worst_check_mm
-                  << " flowerdump_bud_states=" << bud_states[0] << "," << bud_states[1] << "," << bud_states[2] << "," << bud_states[3]
-                  << "," << bud_states[4] << "," << bud_states[5] << " flowerdump_file=" << cfg.s("diag.flowerdump") << std::endl;
-    }
+    // diag.flowerdump <path>: every peduncle, flower and pod with its phytomer (dumpFlowers)
+    dumpFlowers(cfg, context, plantarchitecture, plantIDs, sites);
 
     // diag.petiolecensus 1: every petiole in the scene with the leaflets that should be on it, to account for the
     // bare stalks in the renders. A petiole counts as bare when none of the leaf objects the phytomer lists for it
@@ -1574,6 +1581,7 @@ std::vector<uint> loadCanopyXML(const Config &cfg, Context &context, PlantArchit
     dumpLeafTransforms(cfg, context, plantarchitecture, plantIDs);
     dumpLeafVertices(cfg, context, plantarchitecture, plantIDs);
     dumpLeafUVFit(cfg, context, plantarchitecture, plantIDs);
+    dumpFlowers(cfg, context, plantarchitecture, plantIDs, sites);
     if (sites_out != nullptr) {
         *sites_out = sites;
     }
