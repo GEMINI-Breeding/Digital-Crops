@@ -1611,9 +1611,60 @@ std::vector<uint> loadCanopyXML(const Config &cfg, Context &context, PlantArchit
     return plantIDs;
 }
 
+// canopy.obj_list <list> (I/O addition, 2026-09-28): plain meshes (baseline reconstructions, dumped facets) instead of
+// plants. One line per OBJ:  path [tx ty tz [rx_deg ry_deg rz_deg [scale]]]  -- all optional, identity by default.
+// The mesh is loaded as is (Context::loadOBJ, vertices in scene metres, z up, no rescale), then scaled about its own
+// centroid, rotated about that centroid by rx, ry, rz (in that order, about the world x, y, z axes), then translated
+// by (tx, ty, tz). Every primitive of line k gets siteIndex k + 1 (the site map) and a neutral green reflectance
+// (spectrum_green); there are no plants, so no leaf optics apply. Returns no plant IDs.
+std::vector<uint> loadCanopyOBJ(const Config &cfg, Context &context) {
+    const std::string list_file = cfg.s("canopy.obj_list");
+    std::ifstream f(list_file);
+    if (!f) helios_runtime_error("ERROR (loadCanopyOBJ): cannot open canopy.obj_list " + list_file);
+    std::string line;
+    int k = 0;
+    size_t n_prims = 0;
+    while (std::getline(f, line)) {
+        const size_t c = line.find('#');
+        if (c != std::string::npos) line = line.substr(0, c);
+        std::istringstream ss(line);
+        std::string path;
+        if (!(ss >> path)) continue;
+        float tx = 0, ty = 0, tz = 0, rx = 0, ry = 0, rz = 0, sc = 1;
+        ss >> tx >> ty >> tz >> rx >> ry >> rz >> sc;
+        // Loaded 1000x larger and scaled back: loadOBJ drops every triangle under 1e-8 m^2 (Context_fileIO.cpp,
+        // MIN_TRIANGLE_AREA_THRESHOLD), which removed whole meshes of seedling leaves (facets ~5e-10 m^2).
+        const float kUp = 1000.f;
+        std::vector<uint> U = context.loadOBJ(path.c_str(), make_vec3(0, 0, 0), make_vec3(kUp, kUp, kUp), nullrotation,
+                                              RGB::green, "ZUP", true);
+        if (!U.empty()) context.scalePrimitiveAboutPoint(U, make_vec3(1.f / kUp, 1.f / kUp, 1.f / kUp), make_vec3(0, 0, 0));
+        if (U.empty()) helios_runtime_error("ERROR (loadCanopyOBJ): no primitives in " + path);
+        vec3 cen(0, 0, 0);
+        size_t nv = 0;
+        for (uint u: U)
+            for (const vec3 &v: context.getPrimitiveVertices(u)) { cen = cen + v; nv++; }
+        cen = cen / float(std::max<size_t>(nv, 1));
+        if (sc != 1.f) context.scalePrimitiveAboutPoint(U, make_vec3(sc, sc, sc), cen);
+        if (rx != 0.f) context.rotatePrimitive(U, deg2rad(rx), cen, make_vec3(1, 0, 0));
+        if (ry != 0.f) context.rotatePrimitive(U, deg2rad(ry), cen, make_vec3(0, 1, 0));
+        if (rz != 0.f) context.rotatePrimitive(U, deg2rad(rz), cen, make_vec3(0, 0, 1));
+        if (tx != 0.f || ty != 0.f || tz != 0.f) context.translatePrimitive(U, make_vec3(tx, ty, tz));
+        context.setPrimitiveData(U, "siteIndex", k + 1);
+        context.setPrimitiveData(U, "reflectivity_spectrum", "spectrum_green");
+        std::cout << "SITE " << k << " obj=" << path << " primitives=" << U.size() << std::endl;
+        n_prims += U.size();
+        k++;
+    }
+    std::cout << "DIAG obj_list=" << list_file << " objects=" << k << " primitives=" << n_prims << std::endl;
+    return {};
+}
+
 //! The canopy a pass draws: read from canopy.plant_xml when it is set, grown by buildCanopy() otherwise.
 std::vector<uint> makeCanopy(const Config &cfg, Context &context, PlantArchitecture &plantarchitecture, unsigned scene_seed,
                              std::vector<Site> *sites_out = nullptr) {
+    if (cfg.has("canopy.obj_list")) {
+        return loadCanopyOBJ(cfg, context);
+    }
     if (cfg.has("canopy.plant_xml")) {
         return loadCanopyXML(cfg, context, plantarchitecture, sites_out);
     }
@@ -2862,6 +2913,9 @@ int render(const Config &cfg, unsigned seed) {
         radiation.writePrimitiveDataLabelMap("camA", "siteIndex", base.str() + "_site", out);
     }
     radiation.writeCameraImage("camA", bands, base.str() + "_RGB", out);
+    if (cfg.i("output.write_depth", 0)) {   // I/O addition (2026-09-28): per-pixel camera depth, metres, text map
+        radiation.writeDepthImageData("camA", base.str() + "_depth", out);
+    }
     // Both flower streams share class 0. The crop audit confirmed the real
     // annotations cover buds, open flowers and senescent flowers alike, so
     // splitting them here would create a class-definition gap that does not
@@ -2881,9 +2935,11 @@ int render(const Config &cfg, unsigned seed) {
 //     {"config": "<baseline.cfg>", "seed": 1, "overrides": {"camera.hfov": 71.884, ...}}
 int renderXML(int argc, char **argv) {
     std::string xml, camera, out;
+    bool obj_mode = false;
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string k = argv[i];
         if (k == "--render-xml") xml = argv[i + 1];
+        else if (k == "--render-obj") { xml = argv[i + 1]; obj_mode = true; }
         else if (k == "--camera") camera = argv[i + 1];
         else if (k == "--out") out = argv[i + 1];
         else throw std::runtime_error("unknown argument " + k);
@@ -2902,11 +2958,20 @@ int renderXML(int argc, char **argv) {
     }
     std::filesystem::create_directories(out);
     std::string list = xml;
-    if (xml.size() > 4 && xml.substr(xml.size() - 4) == ".xml") {
-        list = out + "/plant_list.txt";
+    const std::string ext = xml.size() > 4 ? xml.substr(xml.size() - 4) : "";
+    if (ext == ".xml" || ext == ".obj") {
+        list = out + (obj_mode ? "/obj_list.txt" : "/plant_list.txt");
         std::ofstream(list) << xml << "\n";
     }
-    cfg.set("canopy.plant_xml", list);
+    if (obj_mode) {
+        // --render-obj: meshes, not plants; the plant-only outputs are switched off (write_leaf_ids errors on a
+        // scene without leaves), depth is written
+        cfg.set("canopy.obj_list", list);
+        cfg.set("output.write_leaf_ids", "0");
+        cfg.set("output.write_depth", "1");
+    } else {
+        cfg.set("canopy.plant_xml", list);
+    }
     cfg.set("output.folder", out + "/");
     cfg.set("output.write_site_ids", "1");
     return render(cfg, j.value("seed", 1u));
@@ -2916,7 +2981,7 @@ int renderXML(int argc, char **argv) {
 int main(int argc, char **argv) {
     const std::string mode = (argc > 1) ? argv[1] : "";
     try {
-        if (mode == "--render-xml" || mode == "--camera" || mode == "--out") {
+        if (mode == "--render-xml" || mode == "--render-obj" || mode == "--camera" || mode == "--out") {
             return renderXML(argc, argv);
         }
         if (mode == "prospect-grid") {
@@ -2953,6 +3018,7 @@ int main(int argc, char **argv) {
               << "       " << argv[0] << " render [config] [seed] [key value ...]\n"
               << "       " << argv[0] << " geom   [config] [seed] [key value ...]\n"
               << "       " << argv[0] << " raster [config] [seed] [key value ...]\n"
-              << "       " << argv[0] << " --render-xml <plant.xml|list.txt> --camera <scene.json> --out <dir>\n";
+              << "       " << argv[0] << " --render-xml <plant.xml|list.txt> --camera <scene.json> --out <dir>\n"
+              << "       " << argv[0] << " --render-obj <mesh.obj|obj_list.txt> --camera <scene.json> --out <dir>\n";
     return 1;
 }
