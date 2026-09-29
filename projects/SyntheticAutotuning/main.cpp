@@ -5,6 +5,7 @@
 #include "SyntheticAnnotation.h"
 #include "Visualizer.h"
 #include "config.h"
+#include "json.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -2850,11 +2851,53 @@ int render(const Config &cfg, unsigned seed) {
     return 0;
 }
 
+
+// --render-xml <plant.xml | list.txt> --camera <scene.json> --out <dir>   (I/O addition, 2026-09-28)
+// Renders plant-structure XML files made elsewhere (refined reconstructions) through the unchanged render() path:
+// the scene JSON names the base config and the key/value overrides of the twin render being matched (camera, lamp
+// lighting, soil albedo map, leaf optics, rover), the plants replace the grown canopy through canopy.plant_xml, and
+// the per-plant site map (siteIndex = list order + 1) is always written next to the RGB. Scene JSON:
+//     {"config": "<baseline.cfg>", "seed": 1, "overrides": {"camera.hfov": 71.884, ...}}
+int renderXML(int argc, char **argv) {
+    std::string xml, camera, out;
+    for (int i = 1; i + 1 < argc; i += 2) {
+        const std::string k = argv[i];
+        if (k == "--render-xml") xml = argv[i + 1];
+        else if (k == "--camera") camera = argv[i + 1];
+        else if (k == "--out") out = argv[i + 1];
+        else throw std::runtime_error("unknown argument " + k);
+    }
+    if (xml.empty() || camera.empty() || out.empty()) {
+        throw std::runtime_error("usage: --render-xml <plant.xml|list.txt> --camera <scene.json> --out <dir>");
+    }
+    std::ifstream jf(camera);
+    if (!jf) throw std::runtime_error("cannot open scene json " + camera);
+    const nlohmann::json j = nlohmann::json::parse(jf);
+    Config cfg;
+    cfg.load(j.at("config").get<std::string>());
+    for (const auto &kv: j.at("overrides").items()) {
+        const auto &v = kv.value();
+        cfg.set(kv.key(), v.is_string() ? v.get<std::string>() : v.dump());
+    }
+    std::filesystem::create_directories(out);
+    std::string list = xml;
+    if (xml.size() > 4 && xml.substr(xml.size() - 4) == ".xml") {
+        list = out + "/plant_list.txt";
+        std::ofstream(list) << xml << "\n";
+    }
+    cfg.set("canopy.plant_xml", list);
+    cfg.set("output.folder", out + "/");
+    cfg.set("output.write_site_ids", "1");
+    return render(cfg, j.value("seed", 1u));
+}
 } // namespace
 
 int main(int argc, char **argv) {
     const std::string mode = (argc > 1) ? argv[1] : "";
     try {
+        if (mode == "--render-xml" || mode == "--camera" || mode == "--out") {
+            return renderXML(argc, argv);
+        }
         if (mode == "prospect-grid") {
             return dumpProspectGrid(argc > 2 ? std::stoi(argv[2]) : 3000,
                                     argc > 3 ? std::stoul(argv[3]) : 1u,
@@ -2888,6 +2931,7 @@ int main(int argc, char **argv) {
     std::cerr << "usage: " << argv[0] << " prospect-grid [n] [seed] [out]\n"
               << "       " << argv[0] << " render [config] [seed] [key value ...]\n"
               << "       " << argv[0] << " geom   [config] [seed] [key value ...]\n"
-              << "       " << argv[0] << " raster [config] [seed] [key value ...]\n";
+              << "       " << argv[0] << " raster [config] [seed] [key value ...]\n"
+              << "       " << argv[0] << " --render-xml <plant.xml|list.txt> --camera <scene.json> --out <dir>\n";
     return 1;
 }
