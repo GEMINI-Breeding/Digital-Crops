@@ -15,6 +15,7 @@
 #include <limits>
 #include <iostream>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -455,6 +456,12 @@ void dumpLeafVertices(const Config &cfg, Context &context, PlantArchitecture &pl
     const std::string prefix = cfg.s("diag.leafverts");
     std::ofstream index(prefix + "_index.txt");
     std::ofstream verts(prefix + "_verts.f32", std::ios::binary);
+    // I/O addition (2026-09-28): per-vertex texture UVs in the same order as _verts.f32 ((-1, -1) for a primitive
+    // without texture coordinates), and each leaf's texture files, one line per leaf in _index.txt order.
+    std::ofstream uvs(prefix + "_uv.f32", std::ios::binary);
+    std::ofstream nvs(prefix + "_nv.u8", std::ios::binary);   // vertex count of each primitive, in _verts.f32 order
+    std::ofstream texfile(prefix + "_tex.txt");
+    texfile << "# plant objID texture_file(s) of its primitives, ';'-separated, '-' for none\n";
     index << "# plant objID prototype leaf n_leaves n_verts T00..T33\n" << std::setprecision(9);
     for (size_t k = 0; k < plantIDs.size(); k++) {
         for (uint shootID: plantarchitecture.getAllShootIDs(plantIDs[k])) {
@@ -465,13 +472,27 @@ void dumpLeafVertices(const Config &cfg, Context &context, PlantArchitecture &pl
                         if (!context.doesObjectExist(objID)) continue;
                         const int proto = (p < phytomer->leaf_prototype_index.size() && l < phytomer->leaf_prototype_index[p].size()) ? phytomer->leaf_prototype_index[p][l] : -9;
                         size_t n = 0;
+                        std::set<std::string> textures;
                         for (uint u: context.getObjectPrimitiveUUIDs(objID)) {
-                            for (const vec3 &v: context.getPrimitiveVertices(u)) {
+                            const std::vector<vec3> pv = context.getPrimitiveVertices(u);
+                            const std::vector<vec2> puv = context.getPrimitiveTextureUV(u);
+                            const std::string tf = context.getPrimitiveTextureFile(u);
+                            if (!tf.empty()) textures.insert(tf);
+                            const uint8_t nv = uint8_t(pv.size());
+                            nvs.write(reinterpret_cast<const char *>(&nv), 1);
+                            for (size_t q = 0; q < pv.size(); q++) {
+                                const vec3 &v = pv[q];
                                 const float xyz[3] = {v.x, v.y, v.z};
                                 verts.write(reinterpret_cast<const char *>(xyz), sizeof(xyz));
+                                const float uv[2] = {q < puv.size() ? puv[q].x : -1.f, q < puv.size() ? puv[q].y : -1.f};
+                                uvs.write(reinterpret_cast<const char *>(uv), sizeof(uv));
                                 n++;
                             }
                         }
+                        texfile << k << " " << objID << " ";
+                        if (textures.empty()) texfile << "-";
+                        for (auto it = textures.begin(); it != textures.end(); ++it) texfile << (it == textures.begin() ? "" : ";") << *it;
+                        texfile << "\n";
                         float T[16];
                         context.getObjectTransformationMatrix(objID, T);
                         index << k << " " << objID << " " << proto << " " << l << " " << phytomer->leaf_objIDs[p].size() << " " << n;
