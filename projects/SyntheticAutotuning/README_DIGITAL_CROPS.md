@@ -66,8 +66,8 @@ absolute difference 0.66 of 255 or less. The binary runs from a directory laid o
 ## Species (block C, 2026-09-29)
 
 `canopy.species` (default `cowpea`) names the Helios plant-library model (`loadPlantModelFromLibrary`), and a table in
-`main.cpp` maps it to the shoot type the shoot-parameter overrides are written to: cowpea `trifoliate`, sorghum and
-tomato `mainstem`. Heesup approved this change to the plant-model configuration on 2026-09-29; the fitting algorithm
+`main.cpp` maps it to the shoot type the shoot-parameter overrides are written to: cowpea and bean `trifoliate`, sorghum
+and tomato `mainstem`. Heesup approved this change to the plant-model configuration on 2026-09-29; the fitting algorithm
 (`twin/fit.py`, the site/age/seed/yaw search, `twin/canopy.py`) is unchanged.
 
 - **Cowpea is unchanged.** With the key absent every cowpea code path runs as before: the label maps of `--render-xml`,
@@ -105,3 +105,12 @@ tomato `mainstem`. Heesup approved this change to the plant-model configuration 
   unchanged. `twin/real.py` builds it for TomatoWUR (`wur_camera`, `wur_view`, `pose_overrides`, `no_rover_mask`);
   `fit.fit_sparse` places a plant that carries `ground_xy` at that known base; `soil.soil_overrides(soil_map=False)`
   leaves the library soil for frames without a soil map.
+- **Bean (2026-09-30).** `canopy.species bean` loads the library bean, built like cowpea: a one-node `unifoliate` base
+  shoot carrying the `trifoliate` main stem, which the overrides go to. It keeps its library organs (textured
+  trifoliate leaflets, `BeanFlowerPrototype`, `BeanFruitPrototype`) and phenology (40/5/5/30 d); flowers are classes 2
+  and 3 and the pod class 5 in the label maps. `config/bean.cfg` is the library bean with the means of the Digital-Crops
+  generator's `params_bean.json` (bud break 0.35, gravitropic curvature -350 deg/m, leaf pitch 15 deg, petiole pitch
+  35 deg, internode pitch 12.5 deg, flower bud break 0.45, fruit set 0.75) and the generator's middle genotype,
+  spreading (0.045 m internodes, 10 nodes); its active camera is the synthetic benchmark's 720 px nadir view (sun, no
+  rover), and the T4 rover variant is the closing override block. The species table carries bean's age window (DAP
+  10-100), 0.76 m rows with an assumed 0.10 m in-row spacing, 3 leaflets per leaf and the ExG mask.
