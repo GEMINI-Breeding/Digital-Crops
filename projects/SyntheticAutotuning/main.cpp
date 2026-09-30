@@ -148,17 +148,19 @@ uint CowpeaFlowerPrototype_custom(Context *ctx, uint subdivisions, bool flower_i
 // Species switch (2026-09-29, block C). canopy.species names the Helios plant-library model the canopy is built from;
 // absent, it is cowpea, the model every twin fit so far was made with, and every cowpea code path below is unchanged.
 // Each library species registers its own shoot types, and the twin's shoot-parameter overrides go to the species'
-// main shoot type from this table (cowpea's trifoliate; sorghum and tomato grow everything from "mainstem").
+// main shoot type from this table (cowpea's trifoliate; sorghum and tomato grow everything from "mainstem"). Bean
+// (2026-09-30) is the library's other trifoliate legume: a one-node "unifoliate" base shoot carrying the "trifoliate"
+// main stem, as cowpea, so its overrides go to "trifoliate" too.
 std::string plantSpecies(const Config &cfg) {
     return cfg.s("canopy.species", "cowpea");
 }
 
 std::string mainShootType(const std::string &species) {
     static const std::map<std::string, std::string> table = {
-            {"cowpea", "trifoliate"}, {"sorghum", "mainstem"}, {"tomato", "mainstem"}};
+            {"cowpea", "trifoliate"}, {"sorghum", "mainstem"}, {"tomato", "mainstem"}, {"bean", "trifoliate"}};
     const auto it = table.find(species);
     if (it == table.end()) {
-        helios_runtime_error("ERROR: canopy.species '" + species + "' has no shoot-type entry; known: cowpea, sorghum, tomato.");
+        helios_runtime_error("ERROR: canopy.species '" + species + "' has no shoot-type entry; known: cowpea, sorghum, tomato, bean.");
     }
     return it->second;
 }
@@ -168,6 +170,7 @@ std::string mainShootType(const std::string &species) {
 std::vector<float> libraryPhenology(const std::string &species) {
     if (species == "sorghum") return {0.f, -1.f, -1.f, 4.f, 35.f, 1000.f};   // PlantLibrary.cpp buildSorghumPlant
     if (species == "tomato") return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};     // PlantLibrary.cpp buildTomatoPlant
+    if (species == "bean") return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};       // PlantLibrary.cpp buildBeanPlant
     return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};
 }
 
@@ -375,7 +378,7 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     sp.phytomer_parameters.inflorescence.flower_prototype_function = CowpeaFlowerPrototype_custom;
     sp.phytomer_parameters.inflorescence.unique_prototypes = 20;
     } else {
-        // Non-cowpea: the library's own flower and fruit prototypes (sorghum panicle; tomato flower and fruit), each
+        // Non-cowpea: the library's own flower and fruit prototypes (sorghum panicle; tomato flower and fruit; bean flower and pod), each
         // inflorescence key applied only when given.
         if (cfg.has("flower.inflorescence_pitch_max")) {
             sp.phytomer_parameters.inflorescence.pitch.uniformDistribution(
@@ -3031,7 +3034,7 @@ int render(const Config &cfg, unsigned seed) {
     size_t leaf_objects_identified = 0;
     // output.write_class_ids 1 (I/O addition, 2026-09-29): a per-pixel organ class map, <base>_class, with the label
     // rasterizer's class.u8 codes -- 1 leaf, 2 open flower, 3 closed flower, 4 stem/petiole/peduncle, 5 fruit (cowpea
-    // pod, sorghum panicle, tomato fruit), 0 anything else. Off by default, so existing outputs are unchanged.
+    // and bean pod, sorghum panicle, tomato fruit), 0 anything else. Off by default, so existing outputs are unchanged.
     if (cfg.i("output.write_class_ids", 0)) {
         auto tag = [&](const std::vector<uint> &objIDs, int cls) {
             for (uint objID: objIDs) {
