@@ -30,6 +30,8 @@ SPECIES = {
         leaflet_max_plant_fraction=0.8,                                   # a young plant is two or three leaves
         veg_mask="exg",                                                   # the multi-crop package's ExG canopy mask
     ),
+    # Tomato (2026-09-29): compound leaves of 7 leaflets per petiole (PlantLibrary.cpp initializeTomatoShoots); leaflet
+    # solidity measured on the twin's raster (median 0.90-0.94 at DAP 20-70) keeps cowpea's 0.80 filter.
     "tomato": dict(
         config="tomato.cfg",
         shoot_type="mainstem",
@@ -52,3 +54,10 @@ def get(species="cowpea"):
 def of_overrides(ov):
     """The species a set of config overrides names (canopy.species), cowpea when absent."""
     return str(ov.get("canopy.species", "cowpea"))
+
+
+def leaves_from_leaflets(n_leaflets, species="cowpea"):
+    """Compound leaves that `n_leaflets` visible leaflet objects make (3 per cowpea trifoliate, 7 per tomato leaf, 1 per
+    sorghum blade); the rasterizer's object map numbers leaflets, not leaves."""
+    return float(n_leaflets) / get(species)["leaflets_per_leaf"]
+
