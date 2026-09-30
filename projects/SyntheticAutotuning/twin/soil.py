@@ -136,3 +136,14 @@ def write_map(path, amap, meta):
 def preview(amap, path, gain=6.0):
     im = np.clip(amap * gain, 0, 1) ** (1 / 2.2)
     cv2.imwrite(path, cv2.cvtColor((im * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+
+
+def soil_overrides(target, workdir, camera_height_m, ccm, soil_map=True, **kw):
+    """Render overrides for the ground: with `soil_map` the frame's own soil albedo map (albedo_map, written to
+    <workdir>/soil_albedo.bin), as every T4 cowpea twin render uses; without it (T5, 2026-09-29: TomatoWUR's potted
+    plants have no soil in view, a synthetic scene has its own library soil) nothing, so the renderer keeps its
+    library soil spectrum on a flat tile."""
+    if not soil_map:
+        return {}
+    amap, meta = albedo_map(target, camera_height_m, ccm, **kw)
+    return {"scene.soil_albedo_map": write_map(os.path.join(workdir, "soil_albedo.bin"), amap, meta)}

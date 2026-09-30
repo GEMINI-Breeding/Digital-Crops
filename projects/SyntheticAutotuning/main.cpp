@@ -1948,6 +1948,11 @@ struct RasterCamera {
     float cam_z = 0.f; //!< camera height above the bed
     float f_px = 0.f; //!< focal length in pixels
     float sx = 1.f, sy = 1.f; //!< image column grows with sx * world x; image row grows with -sy * world y
+    //! camera.pose (I/O addition, 2026-09-29, block C): a camera at `eye` with image right `ax`, image up `ay` and
+    //! backward axis `az` (it looks along -az), for a calibrated view that is not the rover's nadir one (TomatoWUR).
+    //! Absent, the nadir camera above is used and nothing changes.
+    bool posed = false;
+    vec3 eye, ax, ay, az;
 };
 
 struct RasterTag {
@@ -1980,6 +1985,16 @@ struct RasterMaps {
 void rasterTriangle(RasterMaps &m, const RasterCamera &cam, const vec3 v[3], const vec2 uv[3],
                     const std::vector<std::vector<bool>> *mask, const RasterTag &tag, const vec3 &normal) {
     float px[3], py[3], invd[3];
+    if (cam.posed) {
+        for (int k = 0; k < 3; k++) {
+            const vec3 r = v[k] - cam.eye;
+            const float d = -(r * cam.az);
+            if (d < 1e-3f) return; // at or behind the lens
+            invd[k] = 1.f / d;
+            px[k] = 0.5f * float(cam.W) + cam.f_px * (r * cam.ax) * invd[k];
+            py[k] = 0.5f * float(cam.H) - cam.f_px * (r * cam.ay) * invd[k];
+        }
+    } else
     for (int k = 0; k < 3; k++) {
         const float d = cam.cam_z - v[k].z;
         if (d < 1e-3f) return; // at or behind the lens
@@ -2034,6 +2049,9 @@ void rasterPrimitive(RasterMaps &m, const RasterCamera &cam, const Context &cont
     if (type != PRIMITIVE_TYPE_PATCH && type != PRIMITIVE_TYPE_TRIANGLE) return;
     const std::vector<vec3> verts = context.getPrimitiveVertices(UUID);
     vec3 n = context.getPrimitiveNormal(UUID);
+    if (cam.posed) {
+        if (n * (cam.eye - verts.front()) < 0.f) n = -n; // the side the posed camera sees
+    } else
     if (n.z < 0.f) n = -n; // the side the nadir camera sees
     const std::vector<std::vector<bool>> *mask = nullptr;
     std::vector<vec2> uv;
@@ -2097,6 +2115,24 @@ int raster(const Config &cfg, unsigned seed) {
     // into the JPEG's frame and are verified against a ray-traced siteIndex label map.
     cam.sx = cfg.f("raster.sx", 1.f);
     cam.sy = cfg.f("raster.sy", 1.f);
+    if (cfg.has("camera.pose")) {
+        std::vector<float> q;
+        std::stringstream ss(cfg.s("camera.pose"));
+        std::string tok;
+        while (std::getline(ss, tok, ',')) q.push_back(std::stof(tok));
+        if (q.size() != 12) {
+            helios_runtime_error("ERROR (raster): camera.pose takes 12 comma-separated numbers (eye, right, up, backward axes), got " +
+                                 std::to_string(q.size()) + ".");
+        }
+        cam.posed = true;
+        cam.eye = make_vec3(q[0], q[1], q[2]);
+        cam.ax = make_vec3(q[3], q[4], q[5]);
+        cam.ay = make_vec3(q[6], q[7], q[8]);
+        cam.az = make_vec3(q[9], q[10], q[11]);
+        cam.cam_z = cam.eye.z;
+        std::cout << "DIAG raster camera_pose eye=" << cam.eye.x << "," << cam.eye.y << "," << cam.eye.z << " look=" << -cam.az.x << "," << -cam.az.y
+                  << "," << -cam.az.z << std::endl;
+    }
 
     RasterMaps maps;
     maps.init(cam.W, cam.H);

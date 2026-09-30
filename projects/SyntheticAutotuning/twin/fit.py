@@ -275,7 +275,8 @@ def fit_sparse(target, ov, workdir, ages=(6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 
     I/O (2026-09-29, block C), all defaulting to the T4 rover frame: `camera` = dict(fx=, width=, height=) for a frame
     from another pinhole camera (a synthetic benchmark view); `min_sep_px` the in-row plant separation of the splitting;
     `plants` a plant list in Target.plants() form (with target.plant_labels set) when the plants are given rather than
-    split from the mask (a one-plant scene).
+    split from the mask (a one-plant scene); a plant with a `ground_xy` entry is placed there instead of at its mask
+    centroid's ground point (a posed, non-nadir camera, where the centroid is not above the base).
 
     If `scores` is a dict, stage 3 stores every candidate's IoU in it: scores["iou"][k] is a (n_seeds, n_yaws) list for site k,
     with the seeds in scores["seeds"][k] and the yaws in scores["yaws"]."""
@@ -292,7 +293,8 @@ def fit_sparse(target, ov, workdir, ages=(6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 
     for c in plants:
         area_s = c["area_px"] * sc * sc
         age = float(pin_age) if pin_age is not None else invert_footprint(table, area_s)
-        bx, by = R.ground_xy(c["x"], c["y"], camera_height_m=ov["camera.height"], **cam)
+        # a plant whose ground position is known (TomatoWUR: the labeled stem base) carries it as ground_xy
+        bx, by = c["ground_xy"] if "ground_xy" in c else R.ground_xy(c["x"], c["y"], camera_height_m=ov["camera.height"], **cam)
         sites.append(dict(x=bx, y=by, yaw_deg=0.0, age=age, seed=0, label=c["label"], px=c["x"] * sc, py=c["y"] * sc, area_s=area_s))
     log("stage 1: ages " + " ".join(f"{s['age']:.0f}" for s in sites))
 
