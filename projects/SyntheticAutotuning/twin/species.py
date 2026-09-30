@@ -17,6 +17,9 @@ SPECIES = {
         leaflets_per_leaf=3,
         leaflet_min_solidity=0.80, leaflet_max_plant_fraction=0.5,       # leaflets.py
         veg_mask="a_star",                                                # real.vegetation_mask
+        row_pattern="single", paired_row_offset_m=0.0,                   # one row per detected row line
+        layout_age=40.0,                                                  # canopy.row_layout default
+        dap_range=(5, 46),
     ),
     "sorghum": dict(
         config="sorghum.cfg",
@@ -29,18 +32,29 @@ SPECIES = {
         leaflet_min_solidity=0.50,                                        # a curved strap leaf is not convex
         leaflet_max_plant_fraction=0.8,                                   # a young plant is two or three leaves
         veg_mask="exg",                                                   # the multi-crop package's ExG canopy mask
+        row_pattern="single", paired_row_offset_m=0.0,
+        layout_age=40.0,
+        dap_range=(10, 100),
     ),
-    # Tomato (2026-09-29): compound leaves of 7 leaflets per petiole (PlantLibrary.cpp initializeTomatoShoots); leaflet
-    # solidity measured on the twin's raster (median 0.90-0.94 at DAP 20-70) keeps cowpea's 0.80 filter.
+    # Tomato (T1-T6, 2026-09-29): the library tomato through config/tomato.cfg. Ages span the synthetic benchmark's DAP
+    # range (params_tomato.json draws 10-90); the footprint keeps growing to about DAP 70 (the reference plants: canopy
+    # radius 0.31 / 0.34 / 0.53 m at DAP 20 / 45 / 70), so the table is denser early. Layout: processing tomato on 1.5 m
+    # (60 in) beds, single rows or paired rows 0.30 m apart on one bed, plants 0.30-0.60 m apart in the row (0.45 m);
+    # the multi-crop generator's own field layout draws 0.5-1.0 m in-row and 1-2 planting rows. Leaves are compound, 7
+    # leaflets per petiole; leaflet solidity measured on the twin's raster (median 0.90-0.94, DAP 20-70) keeps
+    # cowpea's 0.80 filter.
     "tomato": dict(
         config="tomato.cfg",
         shoot_type="mainstem",
-        ages=(10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90),
-        stage1_ages=(10, 15, 20, 25, 30, 35, 40, 50),
+        ages=(10, 13, 16, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90),
+        stage1_ages=(10, 13, 16, 20, 25, 30, 35, 40, 45, 50, 60, 70),
         row_spacing_m=1.5, inrow_spacing_m=0.45,
         leaflets_per_leaf=7,
         leaflet_min_solidity=0.80, leaflet_max_plant_fraction=0.5,
         veg_mask="exg",
+        row_pattern="single", paired_row_offset_m=0.30,                  # "paired": two rows 0.30 m apart per bed
+        layout_age=45.0,
+        dap_range=(10, 90),
     ),
 }
 

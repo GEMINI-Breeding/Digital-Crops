@@ -169,12 +169,20 @@ def window_around(px, py, radius_px, W, H):
 
 # ---------------------------------------------------------------- layout ---
 
-def row_layout(target, ov, spacing_m=None, offset_m=0.0, margin_px=60, age=40.0, rng_seed=0):
-    """Sites along each detected row at a fixed in-row spacing, inside the valid frame. `spacing_m` defaults to the
-    in-row spacing of the species the overrides name (twin.species; cowpea 0.15 m)."""
+def row_layout(target, ov, spacing_m=None, offset_m=0.0, margin_px=60, age=None, rng_seed=0, row_pattern=None):
+    """Sites along each detected row at a fixed in-row spacing, inside the valid frame. `spacing_m`, `age` and
+    `row_pattern` default to the species the overrides name (twin.species; cowpea 0.15 m, 40 d, single rows).
+    `row_pattern` "paired" (tomato on a bed) puts two lines of sites paired_row_offset_m apart about each detected row."""
+    from . import species as S
+    sp = S.get(S.of_overrides(ov))
     if spacing_m is None:
-        from . import species as S
-        spacing_m = S.get(S.of_overrides(ov))["inrow_spacing_m"]
+        spacing_m = sp["inrow_spacing_m"]
+    if age is None:
+        age = sp["layout_age"]
+    row_pattern = row_pattern or sp["row_pattern"]
+    if row_pattern not in ("single", "paired"):
+        raise ValueError(f"row_pattern {row_pattern!r}: single or paired")
+    lines = (0.0,) if row_pattern == "single" else (-0.5 * sp["paired_row_offset_m"], 0.5 * sp["paired_row_offset_m"])
     H, W = target.veg.shape
     valid_rows = np.where(target.valid.any(1))[0]
     y_top, y_bot = valid_rows.min() + margin_px, valid_rows.max() - margin_px
@@ -183,10 +191,11 @@ def row_layout(target, ov, spacing_m=None, offset_m=0.0, margin_px=60, age=40.0,
     for col in target.rows:
         x_m, y_hi = R.ground_xy(col, y_top, camera_height_m=ov["camera.height"])
         _, y_lo = R.ground_xy(col, y_bot, camera_height_m=ov["camera.height"])
-        y = y_lo + offset_m
-        while y <= y_hi:
-            sites.append(dict(x=float(x_m), y=float(y), yaw_deg=float(rng.uniform(0, 360)), age=float(age), seed=int(rng.randint(1, 2**31 - 1)), present=True))
-            y += spacing_m
+        for dx in lines:
+            y = y_lo + offset_m
+            while y <= y_hi:
+                sites.append(dict(x=float(x_m + dx), y=float(y), yaw_deg=float(rng.uniform(0, 360)), age=float(age), seed=int(rng.randint(1, 2**31 - 1)), present=True))
+                y += spacing_m
     return sites
 
 
