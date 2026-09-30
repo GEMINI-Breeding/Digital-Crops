@@ -169,8 +169,12 @@ def window_around(px, py, radius_px, W, H):
 
 # ---------------------------------------------------------------- layout ---
 
-def row_layout(target, ov, spacing_m=0.15, offset_m=0.0, margin_px=60, age=40.0, rng_seed=0):
-    """Sites along each detected row at a fixed in-row spacing, inside the valid frame."""
+def row_layout(target, ov, spacing_m=None, offset_m=0.0, margin_px=60, age=40.0, rng_seed=0):
+    """Sites along each detected row at a fixed in-row spacing, inside the valid frame. `spacing_m` defaults to the
+    in-row spacing of the species the overrides name (twin.species; cowpea 0.15 m)."""
+    if spacing_m is None:
+        from . import species as S
+        spacing_m = S.get(S.of_overrides(ov))["inrow_spacing_m"]
     H, W = target.veg.shape
     valid_rows = np.where(target.valid.any(1))[0]
     y_top, y_bot = valid_rows.min() + margin_px, valid_rows.max() - margin_px

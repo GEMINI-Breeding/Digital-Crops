@@ -77,6 +77,29 @@ def vegetation_mask(rgb, a_threshold=-8.0, min_area_px=400):
     return keep[lbl]
 
 
+def exg_mask(rgb, threshold=0.10, min_area_px=400):
+    """Excess-green vegetation mask (2G - R - B on chromaticity-normalized RGB above `threshold`), speckle removed.
+    The multi-crop package segments its sorghum frames this way; cowpea keeps the a* mask above."""
+    f = rgb.astype(np.float32)
+    s = f.sum(-1) + 1e-6
+    r, g, b = f[..., 0] / s, f[..., 1] / s, f[..., 2] / s
+    veg = ((2.0 * g - r - b) > threshold).astype(np.uint8)
+    veg = cv2.morphologyEx(veg, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    n, lbl, stats, _ = cv2.connectedComponentsWithStats(veg, connectivity=8)
+    keep = np.zeros(n, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= min_area_px
+    return keep[lbl]
+
+
+def species_vegetation_mask(rgb, method="a_star", **kw):
+    """The vegetation mask a species' table entry names (twin.species: "a_star" or "exg")."""
+    if method == "a_star":
+        return vegetation_mask(rgb, **kw)
+    if method == "exg":
+        return exg_mask(rgb, **kw)
+    raise ValueError(f"unknown vegetation mask {method!r}")
+
+
 def rover_mask(rgb):
     """Pixels belonging to the rover frame: dark or neutral metal, left and right of the bed.
 
