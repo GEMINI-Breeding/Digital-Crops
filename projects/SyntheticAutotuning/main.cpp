@@ -2294,6 +2294,11 @@ int render(const Config &cfg, unsigned seed) {
     // Replaces the LI-COR measured library: its reflectance carries a ~0.05
     // additive stray-light offset (R(680)=0.083 while T(680)=0.011), which
     // rendered leaves grey-green. PROSPECT is self-consistent by construction.
+    // leaf.optics (2026-09-29): which leaf optics the canopy gets. Only "cowpea" exists -- the PROSPECT parameters of this
+    // config, fitted to cowpea -- and it is the default for every species until per-species optics are decided.
+    if (cfg.s("leaf.optics", "cowpea") != "cowpea") {
+        helios_runtime_error("ERROR (render): leaf.optics '" + cfg.s("leaf.optics") + "' is not available; only 'cowpea' (the config's PROSPECT parameters).");
+    }
     LeafOpticsProperties leafprops;
     leafprops.chlorophyllcontent = cfg.f("leaf.chlorophyll");
     leafprops.carotenoidcontent = cfg.f("leaf.carotenoid");
@@ -2964,6 +2969,30 @@ int render(const Config &cfg, unsigned seed) {
     // branch where it used to sit: a run that gave its leaves one uniform spectrum skipped that branch and wrote a
     // map of zeros without complaint, and every analysis keyed on those IDs was silently reading nothing.
     size_t leaf_objects_identified = 0;
+    // output.write_class_ids 1 (I/O addition, 2026-09-29): a per-pixel organ class map, <base>_class, with the label
+    // rasterizer's class.u8 codes -- 1 leaf, 2 open flower, 3 closed flower, 4 stem/petiole/peduncle, 5 fruit (cowpea
+    // pod, sorghum panicle, tomato fruit), 0 anything else. Off by default, so existing outputs are unchanged.
+    if (cfg.i("output.write_class_ids", 0)) {
+        auto tag = [&](const std::vector<uint> &objIDs, int cls) {
+            for (uint objID: objIDs) {
+                if (context.doesObjectExist(objID)) context.setPrimitiveData(context.getObjectPrimitiveUUIDs(objID), "organClass", cls);
+            }
+        };
+        size_t n_fruit = 0;
+        for (uint id: plantIDs) {
+            tag(plantarchitecture.getPlantInternodeObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantPetioleObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantPeduncleObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantLeafObjectIDs(id), 1);
+            for (uint objID: plantarchitecture.getPlantFlowerObjectIDs(id)) {
+                tag({objID}, context.doesObjectDataExist(objID, "openflowerID") ? 2 : 3);
+            }
+            const std::vector<uint> fruit = plantarchitecture.getPlantFruitObjectIDs(id);
+            n_fruit += fruit.size();
+            tag(fruit, 5);
+        }
+        std::cout << "DIAG organ_class fruit_objects=" << n_fruit << std::endl;
+    }
     if (cfg.i("output.write_leaf_ids", 0)) {
         int leaf_index = 1;
         std::map<uint, int> object_index;
@@ -3013,6 +3042,9 @@ int render(const Config &cfg, unsigned seed) {
     // must agree pixel for pixel, which is how the rasterizer's axis convention is verified.
     if (cfg.i("output.write_site_ids", 0)) {
         radiation.writePrimitiveDataLabelMap("camA", "siteIndex", base.str() + "_site", out);
+    }
+    if (cfg.i("output.write_class_ids", 0)) {
+        radiation.writePrimitiveDataLabelMap("camA", "organClass", base.str() + "_class", out);
     }
     radiation.writeCameraImage("camA", bands, base.str() + "_RGB", out);
     if (cfg.i("output.write_depth", 0)) {   // I/O addition (2026-09-28): per-pixel camera depth, metres, text map
