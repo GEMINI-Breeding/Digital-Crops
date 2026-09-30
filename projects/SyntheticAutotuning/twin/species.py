@@ -56,6 +56,24 @@ SPECIES = {
         layout_age=45.0,
         dap_range=(10, 90),
     ),
+    # Bean (2026-09-30): the library bean through config/bean.cfg, a trifoliate legume built like cowpea (3 leaflets per
+    # leaf; cowpea's leaflet filters). Ages span the synthetic benchmark's DAP range (generate_multicrop_eval_scenes: 10-100);
+    # the table is denser early, where the footprint grows. Layout: the T4 field's 30 in (0.76 m) beds as cowpea, one row
+    # per bed, in-row spacing assumed (0.10 m, not measured). Vegetation mask: ExG, the multi-crop package's canopy mask
+    # for the T4 bean plots.
+    "bean": dict(
+        config="bean.cfg",
+        shoot_type="trifoliate",
+        ages=(10, 13, 16, 20, 25, 30, 35, 40, 45, 50, 60, 70, 85, 100),
+        stage1_ages=(10, 13, 16, 20, 25, 30, 35, 40, 45, 50, 60, 70),
+        row_spacing_m=0.76, inrow_spacing_m=0.10,
+        leaflets_per_leaf=3,
+        leaflet_min_solidity=0.80, leaflet_max_plant_fraction=0.5,
+        veg_mask="exg",
+        row_pattern="single", paired_row_offset_m=0.0,
+        layout_age=40.0,
+        dap_range=(10, 100),
+    ),
 }
 
 
