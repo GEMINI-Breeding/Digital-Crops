@@ -94,3 +94,14 @@ tomato `mainstem`. Heesup approved this change to the plant-model configuration 
   `canopy.species`; `fit.fit_sparse` accepts a camera, a plant list and the in-row separation for frames that are not
   T4 rover frames (for example one-plant synthetic scenes).
 
+- **Tomato (block C step 2, 2026-09-29).** `config/tomato.cfg` restates the library tomato (internode 0.04 m, 16 nodes,
+  phyllochron 2 d, bud break 0.25, a 0.18 m truss of 6 flowers bending -900 deg/m, flower scale 0.05, fruit 0.15,
+  phenology 40/5/5/30) with the benchmark library start's means; its active camera is the synthetic benchmark's 720 px
+  nadir view (sun, no rover), and the TomatoWUR variant is the closing override block. `flower.peduncle_pitch` and
+  `flower.peduncle_curvature` apply to non-cowpea species when given. The species table carries tomato's age window
+  (DAP 10-90), 1.5 m beds with single or paired rows (`row_pattern`) and 0.45 m in-row spacing, and 7 leaflets per leaf.
+- **Posed camera (`camera.pose`).** The label rasterizer takes a full camera pose: 12 comma-separated numbers, the eye
+  and the image-right, image-up and backward axes, in the twin frame. Absent, the nadir camera is used and every map is
+  unchanged. `twin/real.py` builds it for TomatoWUR (`wur_camera`, `wur_view`, `pose_overrides`, `no_rover_mask`);
+  `fit.fit_sparse` places a plant that carries `ground_xy` at that known base; `soil.soil_overrides(soil_map=False)`
+  leaves the library soil for frames without a soil map.
