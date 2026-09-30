@@ -322,6 +322,11 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     if (cfg.has("leaf.pitch_std")) {
         sp.phytomer_parameters.leaf.pitch.normalDistribution(cfg.f("leaf.pitch_mean", 0.f), cfg.f("leaf.pitch_std"));
     }
+    // Leaf roll about its midrib (deg), 2026-09-29: the sorghum library draws U(-12, 12) per leaf; the multi-crop generator
+    // draws one value per plant from its config. Applies only when given.
+    if (cfg.has("leaf.roll_max")) {
+        sp.phytomer_parameters.leaf.roll.uniformDistribution(cfg.f("leaf.roll_min", cfg.f("leaf.roll_max")), cfg.f("leaf.roll_max"));
+    }
     // Leaflet shape and posture, which a nadir view sees as leaflet width: the seedlings' leaflets are broad and flat, the
     // library's (aspect 0.7, midrib fold 0.2, lateral curvature -0.4) come out narrow from above. Each key applies only
     // when given, so configurations written before these existed reproduce unchanged.
@@ -1760,10 +1765,21 @@ std::vector<uint> makeCanopy(const Config &cfg, Context &context, PlantArchitect
     if (cfg.has("canopy.obj_list")) {
         return loadCanopyOBJ(cfg, context);
     }
-    if (cfg.has("canopy.plant_xml")) {
-        return loadCanopyXML(cfg, context, plantarchitecture, sites_out);
+    const std::vector<uint> plantIDs = cfg.has("canopy.plant_xml") ? loadCanopyXML(cfg, context, plantarchitecture, sites_out)
+                                                                    : buildCanopy(cfg, context, plantarchitecture, scene_seed, sites_out);
+    // output.write_plant_obj <path.obj> (I/O addition, 2026-09-29): every plant as one OBJ (with its materials and leaf
+    // textures), after growth and after the per-plant yaw, i.e. the geometry the render and the rasterizer see. Lets a
+    // fitted twin be scored by mesh-based scorers (the multi-crop benchmark's --input-obj re-render).
+    if (cfg.has("output.write_plant_obj")) {
+        std::vector<uint> U;
+        for (uint id: plantIDs) {
+            const std::vector<uint> u = plantarchitecture.getAllPlantUUIDs(id);
+            U.insert(U.end(), u.begin(), u.end());
+        }
+        context.writeOBJ(cfg.s("output.write_plant_obj"), U, false, true);
+        std::cout << "DIAG write_plant_obj=" << cfg.s("output.write_plant_obj") << " primitives=" << U.size() << std::endl;
     }
-    return buildCanopy(cfg, context, plantarchitecture, scene_seed, sites_out);
+    return plantIDs;
 }
 
 // ---------------------------------------------------------------- geometry ---
