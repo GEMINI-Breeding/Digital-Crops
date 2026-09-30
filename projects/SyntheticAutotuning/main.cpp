@@ -391,6 +391,14 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
             sp.phytomer_parameters.peduncle.length.uniformDistribution(
                     cfg.f("flower.peduncle_length_min", cfg.f("flower.peduncle_length_max")), cfg.f("flower.peduncle_length_max"));
         }
+        // Peduncle pitch (deg) and bend (deg/m, negative droops), 2026-09-29 for tomato: the library's truss leaves the stem
+        // at 20 deg and arches at -900 deg/m under its flowers and fruit.
+        if (cfg.has("flower.peduncle_pitch")) {
+            sp.phytomer_parameters.peduncle.pitch = cfg.f("flower.peduncle_pitch");
+        }
+        if (cfg.has("flower.peduncle_curvature")) {
+            sp.phytomer_parameters.peduncle.curvature = cfg.f("flower.peduncle_curvature");
+        }
         if (cfg.has("flower.flowers_per_peduncle_max")) {
             sp.phytomer_parameters.inflorescence.flowers_per_peduncle.uniformDistribution(
                     cfg.i("flower.flowers_per_peduncle_min", cfg.i("flower.flowers_per_peduncle_max")), cfg.i("flower.flowers_per_peduncle_max"));
