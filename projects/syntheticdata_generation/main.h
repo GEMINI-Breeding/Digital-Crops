@@ -56,6 +56,12 @@ struct CommandLineOptions {
     std::string genotype;   // Override genotype archetype (e.g. bush, spreading, vine, dwarf, tall, random)
     std::string input_xml;  // Optional plant XML file to load and render
     std::string dump_organ_poses; // Optional path: write every organ's pose once the plants are built (see dumpOrganPoses)
+    // Scoring predicted geometry with this renderer (image-to-l-system multicrop plan, 2026-09-27); all opt-in.
+    std::vector<std::string> input_objs; // --input-obj (repeatable): OBJ files in scene meters, z-up, loaded as-is; no plant is built unless --input-xml is also given
+    std::string camera_in;       // --camera-in: JSON {position, lookat, hfov_deg} that replaces the camera (after --focus-plant)
+    std::string camera_out;      // --camera-out: write the final camera in the --camera-in format
+    std::string silhouette_out;  // --silhouette-out: binary PGM of every pixel that hits a labeled primitive (plant organ or OBJ)
+    std::string write_obj;       // --write-obj: write the plants' geometry to this OBJ file
     int ground_occlusion = -1; // -1 = use JSON, 0 = disable ground occlusion (lower ground below lowest plant vertex), 1 = enable ground at Z=0
     int ground_clipping = -1;  // -1 = use JSON, 0 = disable ground clipping, 1 = enable ground clipping at Z=0 (prune subsurface organs during growth)
 };

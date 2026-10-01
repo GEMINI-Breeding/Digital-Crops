@@ -59,58 +59,16 @@ std::string getJsonStringOr(const json& root,
                            std::initializer_list<const char*> keys,
                            const std::string& default_value);
 
-void init_plant_architecture(PlantArchitecture& plantarchitecture,
-                             json& sampled_params,
-                             const CommandLineOptions& args) {
-
-    // 1. Determine effective plant model / species
-    std::string plant_type = "cowpea";
-    if (!args.plant_type.empty()) {
-        plant_type = args.plant_type;
-    } else {
-        plant_type = getJsonStringOr(sampled_params, {"metadata", "plant_type"}, "cowpea");
-    }
-    // Transform to lowercase
-    std::transform(plant_type.begin(), plant_type.end(), plant_type.begin(), ::tolower);
-    sampled_params["metadata"]["plant_type"] = plant_type;
-
-    // Validate against registered Helios library models
-    std::vector<std::string> available_models = plantarchitecture.getAvailablePlantModels();
-    bool model_found = false;
-    for (const auto& m : available_models) {
-        if (m == plant_type) {
-            model_found = true;
-            break;
-        }
-    }
-    if (!model_found) {
-        std::cerr << "[WARNING] Plant model '" << plant_type << "' not found in Helios library! Defaulting to 'cowpea'." << std::endl;
-        plant_type = "cowpea";
-        sampled_params["metadata"]["plant_type"] = "cowpea";
-    }
-
-    // Load plant model from Helios library
-    plantarchitecture.loadPlantModelFromLibrary(plant_type);
-    plantarchitecture.disableMessages();
-
-    // 2. Determine effective genotype archetype
-    std::string genotype = "random";
-    if (!args.genotype.empty()) {
-        genotype = args.genotype;
-    } else {
-        genotype = getJsonStringOr(sampled_params, {"metadata", "genotype"}, "random");
-    }
-    std::transform(genotype.begin(), genotype.end(), genotype.begin(), ::tolower);
-    sampled_params["metadata"]["genotype"] = genotype;
+// Apply the plant_properties.architecture overrides (shoot and phytomer parameters) to every shoot type, or to the one
+// shoot type `only_shoot_type` names; an empty `genotype` applies no genotype archetype presets.
+static void apply_architecture_overrides(PlantArchitecture& plantarchitecture, const json& arch_json,
+                                         const std::string& plant_type, const std::string& genotype,
+                                         const std::string& only_shoot_type) {
 
     // Get current shoot parameters map
     std::map<std::string, ShootParameters> shoot_params_map = plantarchitecture.getCurrentShootParameters();
 
     // 3. Parse Shoot & Phytomer Architectural parameters from JSON
-    json arch_json;
-    if (sampled_params.contains("plant_properties") && sampled_params["plant_properties"].contains("architecture")) {
-        arch_json = sampled_params["plant_properties"]["architecture"];
-    }
 
     // --- Shoot Level Parameters ---
     float flower_bud_break_prob = getJsonNumberOr<float>(arch_json, {"shoot", "flower_bud_break_probability"}, 
@@ -194,6 +152,7 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
     for (auto& pair : shoot_params_map) {
         const std::string& shoot_label = pair.first;
         ShootParameters& sp = pair.second;
+        if (!only_shoot_type.empty() && shoot_label != only_shoot_type) continue;
 
         // Shoot-level
         if (flower_bud_break_prob >= 0.0f) sp.flower_bud_break_probability = flower_bud_break_prob;
@@ -244,6 +203,70 @@ void init_plant_architecture(PlantArchitecture& plantarchitecture,
 
         // Save back to plantarchitecture
         plantarchitecture.updateCurrentShootParameters(shoot_label, sp);
+    }
+}
+
+void init_plant_architecture(PlantArchitecture& plantarchitecture,
+                             json& sampled_params,
+                             const CommandLineOptions& args) {
+
+    // 1. Determine effective plant model / species
+    std::string plant_type = "cowpea";
+    if (!args.plant_type.empty()) {
+        plant_type = args.plant_type;
+    } else {
+        plant_type = getJsonStringOr(sampled_params, {"metadata", "plant_type"}, "cowpea");
+    }
+    // Transform to lowercase
+    std::transform(plant_type.begin(), plant_type.end(), plant_type.begin(), ::tolower);
+    sampled_params["metadata"]["plant_type"] = plant_type;
+
+    // Validate against registered Helios library models
+    std::vector<std::string> available_models = plantarchitecture.getAvailablePlantModels();
+    bool model_found = false;
+    for (const auto& m : available_models) {
+        if (m == plant_type) {
+            model_found = true;
+            break;
+        }
+    }
+    if (!model_found) {
+        std::cerr << "[WARNING] Plant model '" << plant_type << "' not found in Helios library! Defaulting to 'cowpea'." << std::endl;
+        plant_type = "cowpea";
+        sampled_params["metadata"]["plant_type"] = "cowpea";
+    }
+
+    // Load plant model from Helios library
+    plantarchitecture.loadPlantModelFromLibrary(plant_type);
+    plantarchitecture.disableMessages();
+
+    // 2. Determine effective genotype archetype
+    std::string genotype = "random";
+    if (!args.genotype.empty()) {
+        genotype = args.genotype;
+    } else {
+        genotype = getJsonStringOr(sampled_params, {"metadata", "genotype"}, "random");
+    }
+    std::transform(genotype.begin(), genotype.end(), genotype.begin(), ::tolower);
+    sampled_params["metadata"]["genotype"] = genotype;
+
+    // 3-4. Shoot & phytomer parameters: the blanket "architecture" block applies to all shoot types; the optional
+    // "architecture_by_shoot_type" map ({"proleptic": {<same schema>}, ...}) then applies to one shoot type each
+    // (trees: trunk vs scaffold vs proleptic). Absent keys leave the library parameters unchanged.
+    json arch_json;
+    if (sampled_params.contains("plant_properties") && sampled_params["plant_properties"].contains("architecture")) {
+        arch_json = sampled_params["plant_properties"]["architecture"];
+    }
+    apply_architecture_overrides(plantarchitecture, arch_json, plant_type, genotype, "");
+    if (sampled_params.contains("plant_properties") && sampled_params["plant_properties"].contains("architecture_by_shoot_type")) {
+        const std::map<std::string, ShootParameters> shoot_types = plantarchitecture.getCurrentShootParameters();
+        for (const auto& item : sampled_params["plant_properties"]["architecture_by_shoot_type"].items()) {
+            if (shoot_types.find(item.key()) == shoot_types.end()) {
+                std::cerr << "[WARNING] architecture_by_shoot_type: shoot type '" << item.key() << "' is not defined for " << plant_type << "; ignored." << std::endl;
+                continue;
+            }
+            apply_architecture_overrides(plantarchitecture, item.value(), plant_type, "", item.key());
+        }
     }
 
     // enable object data output for flower state identification
@@ -786,6 +809,12 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                       << "  --genotype ARCHETYPE     Set genotype archetype (bush, spreading, vine, dwarf, tall, random)\n"
                       << "  --save-xml               Save plant structure XML files (default: true)\n"
                       << "  --dump-organ-poses PATH  Write every organ's pose (leaf transforms, centerlines) once the plants are built\n"
+                      << "  --input-obj PATH         Load an OBJ (scene meters, z-up, no rescale) as one 'predicted_object' instance; repeatable.\n"
+                      << "                           Without --input-xml no plant is built\n"
+                      << "  --camera-in PATH         Use the camera in PATH ({position, lookat, hfov_deg}) instead of the computed one\n"
+                      << "  --camera-out PATH        Write the final camera (after --focus-plant / --camera-in) in the --camera-in format\n"
+                      << "  --silhouette-out PATH    Write a binary PGM (255 = pixel hits a plant organ or an --input-obj primitive)\n"
+                      << "  --write-obj PATH         Write the plants' geometry to an OBJ file\n"
                       << "  --no-save-xml            Skip saving XML files\n"
                       << "  -r, --rotation           Enable rotation view\n"
                       << "  -g, --grow               Enable grow mode\n"
@@ -874,6 +903,16 @@ CommandLineOptions parseCommandLineArgs(int argc, char *argv[]) {
                 options.input_xml = argv[++i];
             } else if (arg == "--dump-organ-poses") {
                 options.dump_organ_poses = argv[++i];
+            } else if (arg == "--input-obj") {
+                options.input_objs.push_back(argv[++i]);
+            } else if (arg == "--camera-in") {
+                options.camera_in = argv[++i];
+            } else if (arg == "--camera-out") {
+                options.camera_out = argv[++i];
+            } else if (arg == "--silhouette-out") {
+                options.silhouette_out = argv[++i];
+            } else if (arg == "--write-obj") {
+                options.write_obj = argv[++i];
             } else {
                 std::printf("Unknown argument: %s\n", arg.c_str());
                 std::printf("Use --help for usage information\n");
@@ -1554,6 +1593,14 @@ int main(int argc, char *argv[]) {
             std::cout << "[INFO] DAP overridden by --dap flag: " << args.dap << " days" << std::endl;
         }
         float plant_age_days = getJsonNumberOr<float>(sampled_params, {"metadata", "dap"}, 0.0f);
+        // Optional plant_properties.build_parameters ({"trunk_height": 0.9, "num_scaffolds": 5, "scaffold_angle": 45, ...}):
+        // the library builder's training-system parameters (PlantLibrary.cpp getParameterValue); absent = library defaults.
+        std::map<std::string, float> build_parameters;
+        if (sampled_params.contains("plant_properties") && sampled_params["plant_properties"].contains("build_parameters")) {
+            for (const auto& item : sampled_params["plant_properties"]["build_parameters"].items()) {
+                build_parameters[item.key()] = item.value().get<float>();
+            }
+        }
 
         if (mode == GenerationMode::AUTO) {
             // Auto plot generation - Earl
@@ -1670,6 +1717,8 @@ int main(int argc, char *argv[]) {
                     json selected_crop = plants[plant_j];
                     if (!args.input_xml.empty()) {
                         selected_crop["xml"] = args.input_xml;
+                    } else if (!args.input_objs.empty()) {
+                        continue; // --input-obj alone: the scene holds only the OBJ geometry
                     }
                     
                     // plant count and age can be changed here
@@ -1731,7 +1780,7 @@ int main(int argc, char *argv[]) {
                     } else {
                         // Build plant from library (grows internally to plant_age_days via age arg)
                         uint plantID;
-                        plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, plant_age_days);
+                        plantID = plantarchitecture.buildPlantInstanceFromLibrary(plant_origin, plant_age_days, build_parameters);
                         plant_IDs_aging.push_back(plantID);
                         std::cout << "Generated plant from library (ID:" << plantID << ", age:" << plant_age_days << ")" << std::endl;
                     }
@@ -1866,6 +1915,29 @@ int main(int argc, char *argv[]) {
                   << final_flower_id << " flowers, "
                   << final_pod_id << " pods." << std::endl;
 
+        // --- Predicted-geometry scoring (--input-obj / --write-obj; image-to-l-system multicrop plan, 2026-09-27) ---
+        // Each --input-obj file is loaded as-is (scene meters, z-up, no rescale, no rotation) and its primitives are
+        // labeled "predicted_object" = file index, so the masks JSON holds it as class 6 and --silhouette-out covers it.
+        // The OBJ gets the leaf optics so the RGB image is plausible; the silhouette does not depend on it.
+        std::vector<uint> obj_UUIDs;
+        for (size_t k = 0; k < args.input_objs.size(); k++) {
+            std::vector<uint> uuids = context.loadOBJ(args.input_objs[k].c_str(), make_vec3(0, 0, 0), 0.f, make_SphericalCoord(0, 0), RGB::green, "ZUP", true);
+            context.setPrimitiveData(uuids, "predicted_object", (uint) k);
+            context.setPrimitiveData(uuids, "reflectivity_spectrum", "leaf_reflectivity_prospect");
+            context.setPrimitiveData(uuids, "transmissivity_spectrum", "leaf_transmissivity_prospect");
+            obj_UUIDs.insert(obj_UUIDs.end(), uuids.begin(), uuids.end());
+            std::cout << "[INFO] input-obj: " << uuids.size() << " primitives from " << args.input_objs[k] << std::endl;
+        }
+        if (!args.write_obj.empty()) {
+            std::vector<uint> plant_uuids_all;
+            for (uint plantID : UUIDs_plants) {
+                std::vector<uint> u = plantarchitecture.getAllPlantUUIDs(plantID);
+                plant_uuids_all.insert(plant_uuids_all.end(), u.begin(), u.end());
+            }
+            context.writeOBJ(args.write_obj, plant_uuids_all, false, true);
+            std::cout << "[INFO] write-obj: " << plant_uuids_all.size() << " primitives to " << args.write_obj << std::endl;
+        }
+
         // Determine whether to apply plant-focused FOV. CLI flag overrides JSON.
         bool json_focus_plants = getJsonBoolOr(
             sampled_params, {"camera", "positioning", "focusing_plants"}, false);
@@ -1896,6 +1968,16 @@ int main(int argc, char *argv[]) {
                         bb_max_y = std::max(bb_max_y, v.y);
                         bb_max_z = std::max(bb_max_z, v.z);
                     }
+                }
+            }
+            for (uint uuid : obj_UUIDs) { // --input-obj geometry frames like a plant
+                for (const auto& v : context.getPrimitiveVertices(uuid)) {
+                    bb_min_x = std::min(bb_min_x, v.x);
+                    bb_min_y = std::min(bb_min_y, v.y);
+                    bb_min_z = std::min(bb_min_z, v.z);
+                    bb_max_x = std::max(bb_max_x, v.x);
+                    bb_max_y = std::max(bb_max_y, v.y);
+                    bb_max_z = std::max(bb_max_z, v.z);
                 }
             }
 
@@ -1979,6 +2061,30 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // --camera-in replaces the camera wholesale (a prediction is scored at the ground-truth render's camera, which
+        // --focus-plant would otherwise re-fit to the prediction); --camera-out records the camera actually used.
+        if (!args.camera_in.empty()) {
+            std::ifstream cam_file(args.camera_in);
+            if (!cam_file) {
+                helios_runtime_error("ERROR: cannot open --camera-in file " + args.camera_in);
+            }
+            json cam = json::parse(cam_file);
+            camera_setup.camera_position = make_vec3(cam["position"][0].get<float>(), cam["position"][1].get<float>(), cam["position"][2].get<float>());
+            camera_setup.camera_lookat = make_vec3(cam["lookat"][0].get<float>(), cam["lookat"][1].get<float>(), cam["lookat"][2].get<float>());
+            camera_setup.cam_prop.HFOV = cam["hfov_deg"].get<float>();
+            std::cout << "[INFO] camera-in: camera from " << args.camera_in << std::endl;
+        }
+        if (!args.camera_out.empty()) {
+            const vec3 &cp = camera_setup.camera_position;
+            const vec3 &cl = camera_setup.camera_lookat;
+            json cam;
+            cam["position"] = {cp.x, cp.y, cp.z};
+            cam["lookat"] = {cl.x, cl.y, cl.z};
+            cam["hfov_deg"] = camera_setup.cam_prop.HFOV;
+            cam["resolution"] = {camera_setup.cam_prop.camera_resolution.x, camera_setup.cam_prop.camera_resolution.y};
+            std::ofstream(args.camera_out) << std::setw(2) << cam << std::endl;
+        }
+
         // Handle ground occlusion (Shift ground plane below lowest plant organ to prevent clipping)
         bool ground_occlusion_enabled = true;
         if (args.ground_occlusion == 0) {
@@ -1997,6 +2103,11 @@ int main(int argc, char *argv[]) {
                     for (const auto& v : context.getPrimitiveVertices(uuid)) {
                         min_plant_z = std::min(min_plant_z, v.z);
                     }
+                }
+            }
+            for (uint uuid : obj_UUIDs) {
+                for (const auto& v : context.getPrimitiveVertices(uuid)) {
+                    min_plant_z = std::min(min_plant_z, v.z);
                 }
             }
             if (min_plant_z < 0.0f) {
@@ -2415,6 +2526,10 @@ int main(int argc, char *argv[]) {
             //   0=internode (shoot in PlantArchitecture), 1=petiole, 2=leaf, 3=floral_bud, 4=flower, 5=pod
             std::vector<std::string> organ_labels = {"shoot", "internode", "petiole", "leaf", "floral_bud", "flower", "pod"};
             std::vector<uint> organ_ids = {0, 0, 1, 2, 3, 4, 5};
+            if (!obj_UUIDs.empty()) {
+                organ_labels.push_back("predicted_object");
+                organ_ids.push_back(6);
+            }
 
             radiation.writeImageBoundingBoxes(cameralabel, organ_labels, organ_ids,
                                               output_dir + "/" + filename +"_boxes", cameralabel+"_classes.txt",
@@ -2423,6 +2538,34 @@ int main(int argc, char *argv[]) {
             radiation.writeImageSegmentationMasks(
                 cameralabel, organ_labels, organ_ids,
                 output_dir + '/' + filename + "_masks.json", image_file);
+
+            // --silhouette-out: the per-pixel union of the labels above, straight from the pixel-to-primitive map, in
+            // the masks' image orientation (RadiationModel::generateLabelMasks flips x the same way). Unlike the COCO
+            // polygons it keeps holes and one-pixel structures.
+            if (!args.silhouette_out.empty()) {
+                std::vector<uint> pixel_UUIDs;
+                context.getGlobalData(("camera_" + cameralabel + "_pixel_UUID").c_str(), pixel_UUIDs);
+                const int W = camera_setup.cam_prop.camera_resolution.x;
+                const int H = camera_setup.cam_prop.camera_resolution.y;
+                std::vector<unsigned char> sil(W * H, 0);
+                for (int j = 0; j < H; j++) {
+                    for (int i_px = 0; i_px < W; i_px++) {
+                        uint p = pixel_UUIDs.at(j * W + (W - i_px - 1));
+                        if (p == 0 || !context.doesPrimitiveExist(p - 1)) {
+                            continue;
+                        }
+                        for (const auto &lab : organ_labels) {
+                            if (context.doesPrimitiveDataExist(p - 1, lab.c_str())) {
+                                sil[j * W + i_px] = 255;
+                                break;
+                            }
+                        }
+                    }
+                }
+                std::ofstream pgm(args.silhouette_out, std::ios::binary);
+                pgm << "P5\n" << W << " " << H << "\n255\n";
+                pgm.write(reinterpret_cast<const char *>(sil.data()), sil.size());
+            }
 
             // auto-calibrate camera using colorboard reference values with
             // quality report (only if user enabled calibration)
