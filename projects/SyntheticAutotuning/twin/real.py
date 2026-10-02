@@ -77,6 +77,29 @@ def vegetation_mask(rgb, a_threshold=-8.0, min_area_px=400):
     return keep[lbl]
 
 
+def exg_mask(rgb, threshold=0.10, min_area_px=400):
+    """Excess-green vegetation mask (2G - R - B on chromaticity-normalized RGB above `threshold`), speckle removed.
+    The multi-crop package segments its sorghum frames this way; cowpea keeps the a* mask above."""
+    f = rgb.astype(np.float32)
+    s = f.sum(-1) + 1e-6
+    r, g, b = f[..., 0] / s, f[..., 1] / s, f[..., 2] / s
+    veg = ((2.0 * g - r - b) > threshold).astype(np.uint8)
+    veg = cv2.morphologyEx(veg, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    n, lbl, stats, _ = cv2.connectedComponentsWithStats(veg, connectivity=8)
+    keep = np.zeros(n, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= min_area_px
+    return keep[lbl]
+
+
+def species_vegetation_mask(rgb, method="a_star", **kw):
+    """The vegetation mask a species' table entry names (twin.species: "a_star" or "exg")."""
+    if method == "a_star":
+        return vegetation_mask(rgb, **kw)
+    if method == "exg":
+        return exg_mask(rgb, **kw)
+    raise ValueError(f"unknown vegetation mask {method!r}")
+
+
 def rover_mask(rgb):
     """Pixels belonging to the rover frame: dark or neutral metal, left and right of the bed.
 
@@ -179,3 +202,72 @@ def summary(path, out_json=None):
     if out_json:
         json.dump(s, open(out_json, "w"), indent=1)
     return s, rgb, veg, rov
+
+
+# ------------------------------------------------------------- TomatoWUR ---
+# I/O for a frame that is not the rover's (T5, 2026-09-29): TomatoWUR (4TU, CC BY-SA 4.0), potted tomato plants on a
+# turntable seen by 15 calibrated 1080 x 1920 cameras (three rings of five; cams 0-4 look about 37 deg down). No rover,
+# no soil: the fit is given the plant mask of the dataset's label image and the camera as a full pose (camera.pose in
+# main.cpp's label rasterizer). The camera model is the one of the benchmark's TomatoWUR scripts
+# (scratch/20260928_tomato/wur/wur_common.camera): the principal point is moved to the image center and the image
+# downsampled by `down` with a >= 50 % coverage rule; hfov from fx (fx and fy differ by < 0.1 %).
+
+WUR_ROOT = "/group/jmearlesgrp/heesup/dataset/external/tomatowur/TomatoWUR"
+WUR_ANN = WUR_ROOT + "/ann_versions/0-paper-2Dto3D_improved/annotations"
+WUR_PLANT_CLASSES = (1, 2, 4)      # leaves, main stem, side stem
+WUR_POLE = 3                       # the support pole, ignored in every comparison
+
+
+def wur_camera(cam, down=4):
+    """TomatoWUR camera `cam` as dict(eye, x_axis (image right), y_axis (image up), z_axis (backward), hfov_deg, width,
+    height, shift_px): world metres, z up; shift_px is the full-resolution (dx, dy) that centers the principal point."""
+    d = json.load(open(f"{WUR_ROOT}/camera_poses/{cam}.json"))
+    E = np.array(d["extrinsics"], dtype=np.float64).reshape(4, 4)
+    Rm, t = E[:3, :3], E[:3, 3]
+    K = d["intrinsics"]
+    W, H = int(K["width"]), int(K["height"])
+    return dict(eye=-Rm.T @ t, x_axis=Rm[0].copy(), y_axis=-Rm[1].copy(), z_axis=-Rm[2].copy(),
+                hfov_deg=float(np.degrees(2.0 * np.arctan(0.5 * W / float(K["fx"])))), width=W // down, height=H // down,
+                shift_px=(int(round(W / 2 - float(K["cx"]))), int(round(H / 2 - float(K["cy"])))))
+
+
+def pose_overrides(cam, origin=(0.0, 0.0, 0.0)):
+    """Rasterizer overrides for a posed camera (wur_camera form), in the twin frame = the world shifted so `origin` (the
+    plant's base) is the twin's origin."""
+    eye = np.asarray(cam["eye"], float) - np.asarray(origin, float)
+    q = list(eye) + list(cam["x_axis"]) + list(cam["y_axis"]) + list(cam["z_axis"])
+    return {"camera.pose": ",".join(f"{float(v):.9g}" for v in q), "camera.hfov": round(float(cam["hfov_deg"]), 6),
+            "camera.resolution_x": int(cam["width"]), "camera.resolution_y": int(cam["height"]),
+            "camera.height": round(float(eye[2]), 6), "scene.load_rover": 0, "raster.ground": 0}
+
+
+def _shift(img, dx, dy, fill=0):
+    out = np.full_like(img, fill)
+    H, W = img.shape[:2]
+    ys, yd = (slice(0, H - dy), slice(dy, H)) if dy >= 0 else (slice(-dy, H), slice(0, H + dy))
+    xs, xd = (slice(0, W - dx), slice(dx, W)) if dx >= 0 else (slice(-dx, W), slice(0, W + dx))
+    out[yd, xd] = img[ys, xs]
+    return out
+
+
+def _pool(b, down, thr=0.5):
+    H, W = (b.shape[0] // down) * down, (b.shape[1] // down) * down
+    return b[:H, :W].reshape(H // down, down, W // down, down).mean((1, 3)) >= thr
+
+
+def wur_view(plant, cam, down=4):
+    """(rgb, plant mask, pole mask) of one TomatoWUR view at the camera's centered, downsampled raster."""
+    c = wur_camera(cam, down)
+    dx, dy = c["shift_px"]
+    lab_img = cv2.imread(f"{WUR_ANN}/{plant}/{plant}_cam_{cam:02d}.png", cv2.IMREAD_UNCHANGED)
+    if lab_img.ndim == 3:
+        lab_img = lab_img[..., 0]
+    lab_img = _shift(lab_img, dx, dy, 0)
+    bgr = _shift(cv2.imread(f"{WUR_ROOT}/images/{plant}/{plant}_cam_{cam:02d}.png", cv2.IMREAD_COLOR), dx, dy, 0)
+    rgb = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), (c["width"], c["height"]), interpolation=cv2.INTER_AREA)
+    return rgb, _pool(np.isin(lab_img, WUR_PLANT_CLASSES), down), _pool(lab_img == WUR_POLE, down, 0.25)
+
+
+def no_rover_mask(shape):
+    """A rover mask for a frame without a rover (synthetic scenes, TomatoWUR): nothing excluded."""
+    return np.zeros(shape, bool)

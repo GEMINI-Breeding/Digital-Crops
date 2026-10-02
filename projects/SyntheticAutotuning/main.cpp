@@ -143,6 +143,37 @@ uint CowpeaFlowerPrototype_custom(Context *ctx, uint subdivisions, bool flower_i
     return objID;
 }
 
+// ----------------------------------------------------------------- species ---
+
+// Species switch (2026-09-29, block C). canopy.species names the Helios plant-library model the canopy is built from;
+// absent, it is cowpea, the model every twin fit so far was made with, and every cowpea code path below is unchanged.
+// Each library species registers its own shoot types, and the twin's shoot-parameter overrides go to the species'
+// main shoot type from this table (cowpea's trifoliate; sorghum and tomato grow everything from "mainstem"). Bean
+// (2026-09-30) is the library's other trifoliate legume: a one-node "unifoliate" base shoot carrying the "trifoliate"
+// main stem, as cowpea, so its overrides go to "trifoliate" too.
+std::string plantSpecies(const Config &cfg) {
+    return cfg.s("canopy.species", "cowpea");
+}
+
+std::string mainShootType(const std::string &species) {
+    static const std::map<std::string, std::string> table = {
+            {"cowpea", "trifoliate"}, {"sorghum", "mainstem"}, {"tomato", "mainstem"}, {"bean", "trifoliate"}};
+    const auto it = table.find(species);
+    if (it == table.end()) {
+        helios_runtime_error("ERROR: canopy.species '" + species + "' has no shoot-type entry; known: cowpea, sorghum, tomato, bean.");
+    }
+    return it->second;
+}
+
+//! The library's own phenology thresholds per species (dormancy break, flower initiation, flower opening, fruit set,
+//! fruit maturity, dormancy), as build<Species>Plant sets them; used for any phenology.* key a non-cowpea config omits.
+std::vector<float> libraryPhenology(const std::string &species) {
+    if (species == "sorghum") return {0.f, -1.f, -1.f, 4.f, 35.f, 1000.f};   // PlantLibrary.cpp buildSorghumPlant
+    if (species == "tomato") return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};     // PlantLibrary.cpp buildTomatoPlant
+    if (species == "bean") return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};       // PlantLibrary.cpp buildBeanPlant
+    return {0.f, 40.f, 5.f, 5.f, 30.f, 1000.f};
+}
+
 // Builds the cowpea canopy: shoot parameters, plant instances on the bed grid, and the growth
 // advance. Shared by the ray-traced camera path and the rasterized geometry path so that a
 // geometry parameter tuned against the fast rasterizer means the same thing in a full render.
@@ -163,7 +194,10 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     if (cfg.i("canopy.ground_clipping", 0) != 0) {
         plantarchitecture.enableGroundClipping(0.);
     }
-    plantarchitecture.loadPlantModelFromLibrary("cowpea");
+    const std::string species = plantSpecies(cfg);
+    const bool cowpea = species == "cowpea";
+    const std::string shoot_type = mainShootType(species);
+    plantarchitecture.loadPlantModelFromLibrary(species);
 
     // The untuned reference: every shoot parameter and the phenology thresholds as the library
     // ships them, none of the overrides below from either project. Used for the naive baseline
@@ -172,15 +206,24 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     if (library_defaults) {
         std::cout << "DIAG library_defaults=1 (no shoot-parameter or phenology overrides)" << std::endl;
     }
-    ShootParameters sp = plantarchitecture.getCurrentShootParameters("trifoliate");
+    ShootParameters sp = plantarchitecture.getCurrentShootParameters(shoot_type);
     if (!library_defaults) {
+    // Species guards: the cowpea-only settings (petiole radius, scanned leaflet OBJ, the leaflet size default, the
+    // flower block with its custom prototype) apply to cowpea alone. Another species keeps its library prototypes, and
+    // the flat numeric keys below apply to it only when its config gives them.
+    if (cowpea) {
     sp.phytomer_parameters.petiole.radius = 0.002;
+    }
     // High-resolution scanned leaf meshes (~1,600 triangles per leaflet, with an
     // alpha cut-out texture) instead of the procedural leaf generator. Much
     // slower -- scene primitive count rises roughly 10x -- but it is what the
     // baseline dataset used, so any visual comparison against that set has to
     // use it too.
     if (cfg.i("leaf.use_obj_mesh", 0)) {
+        if (!cowpea) {
+            helios_runtime_error("ERROR (configurePlantModel): leaf.use_obj_mesh 1 loads the scanned cowpea leaflet meshes; "
+                                 "canopy.species " + species + " keeps its library leaf prototype (set leaf.use_obj_mesh 0).");
+        }
         sp.phytomer_parameters.leaf.prototype.prototype_function = CowpeaLeafPrototype_trifoliate_OBJ;
     }
     // Inflorescence pitch was previously pinned to a flat 90 deg, which stood every
@@ -189,8 +232,10 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     // throughout, which is a botanically reasonable cowpea leaflet but not necessarily the right
     // one for these plots. Leaf-scale granulometry puts synthetic canopy structure ~19% smaller
     // than real, and this is the parameter that moves it.
+    if (cowpea || cfg.has("leaf.prototype_scale_max")) {
     sp.phytomer_parameters.leaf.prototype_scale.uniformDistribution(
-            cfg.f("leaf.prototype_scale_min", 0.09f), cfg.f("leaf.prototype_scale_max", 0.12f));
+            cfg.f("leaf.prototype_scale_min", cowpea ? 0.09f : cfg.f("leaf.prototype_scale_max")), cfg.f("leaf.prototype_scale_max", 0.12f));
+    }
 
     // Stem architecture. The library packs a trifoliate leaf with 0.10-0.16 m leaflets onto nodes
     // spaced only 0.025 m apart, so each leaf spans 4-6 times its own spacing and the leaves stack
@@ -280,6 +325,11 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     if (cfg.has("leaf.pitch_std")) {
         sp.phytomer_parameters.leaf.pitch.normalDistribution(cfg.f("leaf.pitch_mean", 0.f), cfg.f("leaf.pitch_std"));
     }
+    // Leaf roll about its midrib (deg), 2026-09-29: the sorghum library draws U(-12, 12) per leaf; the multi-crop generator
+    // draws one value per plant from its config. Applies only when given.
+    if (cfg.has("leaf.roll_max")) {
+        sp.phytomer_parameters.leaf.roll.uniformDistribution(cfg.f("leaf.roll_min", cfg.f("leaf.roll_max")), cfg.f("leaf.roll_max"));
+    }
     // Leaflet shape and posture, which a nadir view sees as leaflet width: the seedlings' leaflets are broad and flat, the
     // library's (aspect 0.7, midrib fold 0.2, lateral curvature -0.4) come out narrow from above. Each key applies only
     // when given, so configurations written before these existed reproduce unchanged.
@@ -312,6 +362,7 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
         sp.phytomer_parameters.internode.pitch = cfg.f("canopy.internode_pitch");
     }
 
+    if (cowpea) {
     sp.phytomer_parameters.inflorescence.pitch.uniformDistribution(
             cfg.f("flower.inflorescence_pitch_min"), cfg.f("flower.inflorescence_pitch_max"));
     sp.phytomer_parameters.inflorescence.flower_prototype_scale = cfg.f("flower.prototype_scale");
@@ -326,7 +377,47 @@ bool configurePlantModel(const Config &cfg, PlantArchitecture &plantarchitecture
     closed_flower_scale = cfg.f("flower.closed_scale", 1.0f);
     sp.phytomer_parameters.inflorescence.flower_prototype_function = CowpeaFlowerPrototype_custom;
     sp.phytomer_parameters.inflorescence.unique_prototypes = 20;
-    plantarchitecture.updateCurrentShootParameters("trifoliate", sp);
+    } else {
+        // Non-cowpea: the library's own flower and fruit prototypes (sorghum panicle; tomato flower and fruit; bean flower and pod), each
+        // inflorescence key applied only when given.
+        if (cfg.has("flower.inflorescence_pitch_max")) {
+            sp.phytomer_parameters.inflorescence.pitch.uniformDistribution(
+                    cfg.f("flower.inflorescence_pitch_min", cfg.f("flower.inflorescence_pitch_max")), cfg.f("flower.inflorescence_pitch_max"));
+        }
+        if (cfg.has("flower.prototype_scale")) {
+            sp.phytomer_parameters.inflorescence.flower_prototype_scale = cfg.f("flower.prototype_scale");
+        }
+        if (cfg.has("fruit.prototype_scale")) {
+            sp.phytomer_parameters.inflorescence.fruit_prototype_scale = cfg.f("fruit.prototype_scale");
+        }
+        if (cfg.has("flower.peduncle_length_max")) {
+            sp.phytomer_parameters.peduncle.length.uniformDistribution(
+                    cfg.f("flower.peduncle_length_min", cfg.f("flower.peduncle_length_max")), cfg.f("flower.peduncle_length_max"));
+        }
+        // Peduncle pitch (deg) and bend (deg/m, negative droops), 2026-09-29 for tomato: the library's truss leaves the stem
+        // at 20 deg and arches at -900 deg/m under its flowers and fruit.
+        if (cfg.has("flower.peduncle_pitch")) {
+            sp.phytomer_parameters.peduncle.pitch = cfg.f("flower.peduncle_pitch");
+        }
+        if (cfg.has("flower.peduncle_curvature")) {
+            sp.phytomer_parameters.peduncle.curvature = cfg.f("flower.peduncle_curvature");
+        }
+        if (cfg.has("flower.flowers_per_peduncle_max")) {
+            sp.phytomer_parameters.inflorescence.flowers_per_peduncle.uniformDistribution(
+                    cfg.i("flower.flowers_per_peduncle_min", cfg.i("flower.flowers_per_peduncle_max")), cfg.i("flower.flowers_per_peduncle_max"));
+        }
+        if (cfg.has("flower.flower_offset")) {
+            sp.phytomer_parameters.inflorescence.flower_offset = cfg.f("flower.flower_offset");
+        }
+        if (cfg.has("flower.bud_break_prob_max")) {
+            sp.flower_bud_break_probability.uniformDistribution(
+                    cfg.f("flower.bud_break_prob_min", cfg.f("flower.bud_break_prob_max")), cfg.f("flower.bud_break_prob_max"));
+        }
+        if (cfg.has("flower.fruit_set_probability")) {
+            sp.fruit_set_probability = cfg.f("flower.fruit_set_probability");
+        }
+    }
+    plantarchitecture.updateCurrentShootParameters(shoot_type, sp);
     } // !library_defaults
     return library_defaults;
 }
@@ -726,6 +817,18 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     const vec2 bed_size(cfg.f("canopy.bed_size_x"), cfg.f("canopy.bed_size_y"));
     const vec2 plant_spacing(cfg.f("canopy.plant_spacing_x"), cfg.f("canopy.plant_spacing_y"));
     const bool library_defaults = configurePlantModel(cfg, plantarchitecture);
+    const std::string species = plantSpecies(cfg);
+    const bool cowpea = species == "cowpea";
+    // Non-cowpea phenology: the library's own thresholds (set by build<Species>Plant) unless the config gives any
+    // phenology.* key, in which case the missing ones default to the library's values, not to cowpea's.
+    const bool phenology_keys = cfg.has("phenology.time_to_flower_initiation") || cfg.has("phenology.time_to_flower_opening") ||
+                                cfg.has("phenology.time_to_fruit_set") || cfg.has("phenology.time_to_fruit_maturity") ||
+                                cfg.has("phenology.time_to_dormancy");
+    const std::vector<float> lib_phen = libraryPhenology(species);
+    if (!cowpea && cfg.i("leaf.angle_tracking", 0) && !(cfg.has("leaf.angle_beta_mu") && cfg.has("leaf.angle_beta_nu"))) {
+        helios_runtime_error("ERROR (buildCanopy): leaf.angle_tracking defaults to the measured cowpea Beta(1.398, 1.574); for canopy.species " +
+                             species + " give leaf.angle_beta_mu and leaf.angle_beta_nu explicitly.");
+    }
 
     // Row count was hard-coded at 2. Frame-level canopy cover is the gap being
     // closed here (synthetic 0.55 vs real 0.838), and row count is the lever that
@@ -772,7 +875,7 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
         // against a measured real 0.54 m. The model grows too tall relative
         // to when it flowers, so phenology is exposed and advanced to
         // reconcile the two: real cowpea IS flowering heavily at 0.54 m.
-        if (!library_defaults)
+        if (!library_defaults && cowpea)
         plantarchitecture.setPlantPhenologicalThresholds(s.plantID,
                 0.f,
                 cfg.f("phenology.time_to_flower_initiation", 40.f),
@@ -780,6 +883,14 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
                 cfg.f("phenology.time_to_fruit_set", 5.f),
                 cfg.f("phenology.time_to_fruit_maturity", 30.f),
                 cfg.f("phenology.time_to_dormancy", 1000.f));
+        else if (!library_defaults && phenology_keys)
+        plantarchitecture.setPlantPhenologicalThresholds(s.plantID,
+                lib_phen[0],
+                cfg.f("phenology.time_to_flower_initiation", lib_phen[1]),
+                cfg.f("phenology.time_to_flower_opening", lib_phen[2]),
+                cfg.f("phenology.time_to_fruit_set", lib_phen[3]),
+                cfg.f("phenology.time_to_fruit_maturity", lib_phen[4]),
+                cfg.f("phenology.time_to_dormancy", lib_phen[5]));
         // Leaf inclination steered through growth rather than imposed on the finished plant. Measured cowpea runs
         // Beta(1.398, 1.574) -- mean inclination 42 degrees -- consistently across many genotypes, where the library
         // generates a flatter canopy; and re-aiming a grown plant (leaf.set_angle_distribution) moves leaves that have
@@ -843,7 +954,7 @@ std::vector<uint> buildCanopy(const Config &cfg, Context &context, PlantArchitec
     std::vector<uint> plantIDs;
     plantIDs.reserve(sites.size());
     for (const Site &s: sites) plantIDs.push_back(s.plantID);
-    std::cout << "built " << plantIDs.size() << " cowpea plants" << std::endl;
+    std::cout << "built " << plantIDs.size() << " " << species << " plants" << std::endl;
 
     // --- nitrogen model, for leaf-to-leaf colour variation ---------------------------------
     // Every leaf in this scene was rendered with one spectrum: leafoptics.run() was called once
@@ -1665,10 +1776,21 @@ std::vector<uint> makeCanopy(const Config &cfg, Context &context, PlantArchitect
     if (cfg.has("canopy.obj_list")) {
         return loadCanopyOBJ(cfg, context);
     }
-    if (cfg.has("canopy.plant_xml")) {
-        return loadCanopyXML(cfg, context, plantarchitecture, sites_out);
+    const std::vector<uint> plantIDs = cfg.has("canopy.plant_xml") ? loadCanopyXML(cfg, context, plantarchitecture, sites_out)
+                                                                    : buildCanopy(cfg, context, plantarchitecture, scene_seed, sites_out);
+    // output.write_plant_obj <path.obj> (I/O addition, 2026-09-29): every plant as one OBJ (with its materials and leaf
+    // textures), after growth and after the per-plant yaw, i.e. the geometry the render and the rasterizer see. Lets a
+    // fitted twin be scored by mesh-based scorers (the multi-crop benchmark's --input-obj re-render).
+    if (cfg.has("output.write_plant_obj")) {
+        std::vector<uint> U;
+        for (uint id: plantIDs) {
+            const std::vector<uint> u = plantarchitecture.getAllPlantUUIDs(id);
+            U.insert(U.end(), u.begin(), u.end());
+        }
+        context.writeOBJ(cfg.s("output.write_plant_obj"), U, false, true);
+        std::cout << "DIAG write_plant_obj=" << cfg.s("output.write_plant_obj") << " primitives=" << U.size() << std::endl;
     }
-    return buildCanopy(cfg, context, plantarchitecture, scene_seed, sites_out);
+    return plantIDs;
 }
 
 // ---------------------------------------------------------------- geometry ---
@@ -1829,6 +1951,11 @@ struct RasterCamera {
     float cam_z = 0.f; //!< camera height above the bed
     float f_px = 0.f; //!< focal length in pixels
     float sx = 1.f, sy = 1.f; //!< image column grows with sx * world x; image row grows with -sy * world y
+    //! camera.pose (I/O addition, 2026-09-29, block C): a camera at `eye` with image right `ax`, image up `ay` and
+    //! backward axis `az` (it looks along -az), for a calibrated view that is not the rover's nadir one (TomatoWUR).
+    //! Absent, the nadir camera above is used and nothing changes.
+    bool posed = false;
+    vec3 eye, ax, ay, az;
 };
 
 struct RasterTag {
@@ -1861,6 +1988,16 @@ struct RasterMaps {
 void rasterTriangle(RasterMaps &m, const RasterCamera &cam, const vec3 v[3], const vec2 uv[3],
                     const std::vector<std::vector<bool>> *mask, const RasterTag &tag, const vec3 &normal) {
     float px[3], py[3], invd[3];
+    if (cam.posed) {
+        for (int k = 0; k < 3; k++) {
+            const vec3 r = v[k] - cam.eye;
+            const float d = -(r * cam.az);
+            if (d < 1e-3f) return; // at or behind the lens
+            invd[k] = 1.f / d;
+            px[k] = 0.5f * float(cam.W) + cam.f_px * (r * cam.ax) * invd[k];
+            py[k] = 0.5f * float(cam.H) - cam.f_px * (r * cam.ay) * invd[k];
+        }
+    } else
     for (int k = 0; k < 3; k++) {
         const float d = cam.cam_z - v[k].z;
         if (d < 1e-3f) return; // at or behind the lens
@@ -1915,6 +2052,9 @@ void rasterPrimitive(RasterMaps &m, const RasterCamera &cam, const Context &cont
     if (type != PRIMITIVE_TYPE_PATCH && type != PRIMITIVE_TYPE_TRIANGLE) return;
     const std::vector<vec3> verts = context.getPrimitiveVertices(UUID);
     vec3 n = context.getPrimitiveNormal(UUID);
+    if (cam.posed) {
+        if (n * (cam.eye - verts.front()) < 0.f) n = -n; // the side the posed camera sees
+    } else
     if (n.z < 0.f) n = -n; // the side the nadir camera sees
     const std::vector<std::vector<bool>> *mask = nullptr;
     std::vector<vec2> uv;
@@ -1978,6 +2118,24 @@ int raster(const Config &cfg, unsigned seed) {
     // into the JPEG's frame and are verified against a ray-traced siteIndex label map.
     cam.sx = cfg.f("raster.sx", 1.f);
     cam.sy = cfg.f("raster.sy", 1.f);
+    if (cfg.has("camera.pose")) {
+        std::vector<float> q;
+        std::stringstream ss(cfg.s("camera.pose"));
+        std::string tok;
+        while (std::getline(ss, tok, ',')) q.push_back(std::stof(tok));
+        if (q.size() != 12) {
+            helios_runtime_error("ERROR (raster): camera.pose takes 12 comma-separated numbers (eye, right, up, backward axes), got " +
+                                 std::to_string(q.size()) + ".");
+        }
+        cam.posed = true;
+        cam.eye = make_vec3(q[0], q[1], q[2]);
+        cam.ax = make_vec3(q[3], q[4], q[5]);
+        cam.ay = make_vec3(q[6], q[7], q[8]);
+        cam.az = make_vec3(q[9], q[10], q[11]);
+        cam.cam_z = cam.eye.z;
+        std::cout << "DIAG raster camera_pose eye=" << cam.eye.x << "," << cam.eye.y << "," << cam.eye.z << " look=" << -cam.az.x << "," << -cam.az.y
+                  << "," << -cam.az.z << std::endl;
+    }
 
     RasterMaps maps;
     maps.init(cam.W, cam.H);
@@ -2199,6 +2357,11 @@ int render(const Config &cfg, unsigned seed) {
     // Replaces the LI-COR measured library: its reflectance carries a ~0.05
     // additive stray-light offset (R(680)=0.083 while T(680)=0.011), which
     // rendered leaves grey-green. PROSPECT is self-consistent by construction.
+    // leaf.optics (2026-09-29): which leaf optics the canopy gets. Only "cowpea" exists -- the PROSPECT parameters of this
+    // config, fitted to cowpea -- and it is the default for every species until per-species optics are decided.
+    if (cfg.s("leaf.optics", "cowpea") != "cowpea") {
+        helios_runtime_error("ERROR (render): leaf.optics '" + cfg.s("leaf.optics") + "' is not available; only 'cowpea' (the config's PROSPECT parameters).");
+    }
     LeafOpticsProperties leafprops;
     leafprops.chlorophyllcontent = cfg.f("leaf.chlorophyll");
     leafprops.carotenoidcontent = cfg.f("leaf.carotenoid");
@@ -2640,7 +2803,7 @@ int render(const Config &cfg, unsigned seed) {
     if (cfg.i("output.write_exr", 0)) {
         std::filesystem::create_directories(cfg.s("output.folder"));
         std::stringstream raw_base;
-        raw_base << "cowpea_" << std::setfill('0') << std::setw(3) << cfg.i("canopy.age")
+        raw_base << plantSpecies(cfg) << "_" << std::setfill('0') << std::setw(3) << cfg.i("canopy.age")
                  << "_" << std::setfill('0') << std::setw(7) << seed << "_raw";
         radiation.writeCameraImageDataEXR("camA", bands, raw_base.str(), cfg.s("output.folder"));
         std::cout << "DIAG wrote_exr=" << raw_base.str() << ".exr"
@@ -2869,6 +3032,30 @@ int render(const Config &cfg, unsigned seed) {
     // branch where it used to sit: a run that gave its leaves one uniform spectrum skipped that branch and wrote a
     // map of zeros without complaint, and every analysis keyed on those IDs was silently reading nothing.
     size_t leaf_objects_identified = 0;
+    // output.write_class_ids 1 (I/O addition, 2026-09-29): a per-pixel organ class map, <base>_class, with the label
+    // rasterizer's class.u8 codes -- 1 leaf, 2 open flower, 3 closed flower, 4 stem/petiole/peduncle, 5 fruit (cowpea
+    // and bean pod, sorghum panicle, tomato fruit), 0 anything else. Off by default, so existing outputs are unchanged.
+    if (cfg.i("output.write_class_ids", 0)) {
+        auto tag = [&](const std::vector<uint> &objIDs, int cls) {
+            for (uint objID: objIDs) {
+                if (context.doesObjectExist(objID)) context.setPrimitiveData(context.getObjectPrimitiveUUIDs(objID), "organClass", cls);
+            }
+        };
+        size_t n_fruit = 0;
+        for (uint id: plantIDs) {
+            tag(plantarchitecture.getPlantInternodeObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantPetioleObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantPeduncleObjectIDs(id), 4);
+            tag(plantarchitecture.getPlantLeafObjectIDs(id), 1);
+            for (uint objID: plantarchitecture.getPlantFlowerObjectIDs(id)) {
+                tag({objID}, context.doesObjectDataExist(objID, "openflowerID") ? 2 : 3);
+            }
+            const std::vector<uint> fruit = plantarchitecture.getPlantFruitObjectIDs(id);
+            n_fruit += fruit.size();
+            tag(fruit, 5);
+        }
+        std::cout << "DIAG organ_class fruit_objects=" << n_fruit << std::endl;
+    }
     if (cfg.i("output.write_leaf_ids", 0)) {
         int leaf_index = 1;
         std::map<uint, int> object_index;
@@ -2891,7 +3078,7 @@ int render(const Config &cfg, unsigned seed) {
     // failed at the write, leaving an empty output folder.
     std::filesystem::create_directories(out);
     std::stringstream base;
-    base << "cowpea_" << std::setfill('0') << std::setw(3) << cfg.i("canopy.age")
+    base << plantSpecies(cfg) << "_" << std::setfill('0') << std::setw(3) << cfg.i("canopy.age")
          << "_" << std::setfill('0') << std::setw(7) << seed;
     if (cfg.i("output.write_raw", 0)) {
         for (const auto &b: bands) radiation.writeCameraImageData("camA", b, base.str() + "_raw_" + b, out);
@@ -2918,6 +3105,9 @@ int render(const Config &cfg, unsigned seed) {
     // must agree pixel for pixel, which is how the rasterizer's axis convention is verified.
     if (cfg.i("output.write_site_ids", 0)) {
         radiation.writePrimitiveDataLabelMap("camA", "siteIndex", base.str() + "_site", out);
+    }
+    if (cfg.i("output.write_class_ids", 0)) {
+        radiation.writePrimitiveDataLabelMap("camA", "organClass", base.str() + "_class", out);
     }
     radiation.writeCameraImage("camA", bands, base.str() + "_RGB", out);
     if (cfg.i("output.write_depth", 0)) {   // I/O addition (2026-09-28): per-pixel camera depth, metres, text map

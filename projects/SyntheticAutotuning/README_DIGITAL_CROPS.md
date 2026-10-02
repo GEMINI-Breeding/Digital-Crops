@@ -25,6 +25,10 @@ The cowpea digital twin (Bailey lab, `SyntheticAutotuning`), kept here as the pr
 | `--render-xml <xml or list> --camera <scene.json> --out <dir>` | renders refined plant XMLs through the unchanged render path, with the per-plant site map |
 | `--render-obj <list> --camera <scene.json> --out <dir>`, `canopy.obj_list`, `output.write_depth` | renders plain meshes (baselines) in the twin scene, with a label map and depth |
 | `paths.syn2real_dir`, `paths.soil_spec_xml` | where the Syn2Real_cowpea assets are (see below); defaults keep the upstream relative path |
+| `canopy.species` (2026-09-29, block C) | which Helios library model the canopy is built from; see "Species" below |
+| `output.write_class_ids` | per-pixel organ class map `<base>_class` in the render: 1 leaf, 2 open flower, 3 closed flower, 4 stem, 5 fruit (cowpea pod, sorghum panicle, tomato fruit) |
+| `output.write_plant_obj <path>` | every plant as one OBJ with its leaf textures, after growth and yaw (for mesh-based scorers) |
+| `leaf.optics`, `leaf.roll_min/max` | leaf optics choice (only `cowpea` exists); leaf roll range, applied only when given |
 
 ## Build
 
@@ -58,3 +62,55 @@ absolute difference 0.66 of 255 or less. The binary runs from a directory laid o
 `<tree>/Syn2Real_cowpea`; image-to-l-system's `twin_render.ensure_runtree()` builds it, and `TWIN_RENDER_BIN` /
 `TWIN_RENDER_RUNTREE` point that wrapper at this build. The procedure and scripts are image-to-l-system
 `scratch/20260928_twin_render/parity_run.py` (steps A, B, Bp) and `parity_compare.py`.
+
+## Species (block C, 2026-09-29)
+
+`canopy.species` (default `cowpea`) names the Helios plant-library model (`loadPlantModelFromLibrary`), and a table in
+`main.cpp` maps it to the shoot type the shoot-parameter overrides are written to: cowpea and bean `trifoliate`, sorghum
+and tomato `mainstem`. Heesup approved this change to the plant-model configuration on 2026-09-29; the fitting algorithm
+(`twin/fit.py`, the site/age/seed/yaw search, `twin/canopy.py`) is unchanged.
+
+- **Cowpea is unchanged.** With the key absent every cowpea code path runs as before: the label maps of `--render-xml`,
+  `--render-obj`, a grown render and the label rasterizer were byte-identical to the previous binary (image-to-l-system
+  `scratch/20260929_twin_sorghum/jobs/build_parity.sbatch`); the grown render's RGB differs only by GPU ray-tracing
+  noise (mean 0.13 of 255).
+- **Other species keep the library's organs.** The cowpea-only settings (0.002 m petiole radius, the scanned leaflet OBJ,
+  the leaflet size default, the flower block with `CowpeaFlowerPrototype_custom`, the cowpea phenology thresholds) apply
+  to cowpea alone. A sorghum or tomato plant keeps its library prototypes (sorghum strap leaf and panicle; tomato
+  compound leaf, flower and fruit) and the phenology its `build<Species>Plant` sets; a flat shoot key
+  (`canopy.internode_length_max`, `canopy.phyllochron`, `canopy.max_nodes`, bud break, `leaf.prototype_scale_*`,
+  `flower.*`, `fruit.prototype_scale`, `phenology.*`) applies only when the config gives it. `leaf.use_obj_mesh 1` and
+  `leaf.angle_tracking` without explicit Beta parameters are errors for a non-cowpea species.
+- **Output names** carry the species (`cowpea_040_...`, `sorghum_040_...`).
+- **Configs.** `config/baseline.cfg` is cowpea. `config/sorghum.cfg` is the T4 rover variant (real sorghum plots:
+  Basler camera, lamp rig, rover, 0.73 m rows); its closing comment block lists the overrides of the synthetic-scene
+  variant (the multi-crop benchmark's 720 px nadir camera, sun, no rover). Its plant is the Digital-Crops generator's
+  sorghum config at its means with the "tall" internode (0.28 m), the plant the benchmark's library start uses.
+- **Leaf optics are cowpea's for every species** (`leaf.optics cowpea`, the config's PROSPECT parameters). Per-species
+  optics are a decision for Heesup; silhouettes and label maps do not depend on it.
+- **Python side.** `twin/species.py` holds the per-species priors the fit is given: age window, row and in-row spacing,
+  leaflets per leaf (cowpea 3, sorghum 1, tomato 7), the leaflet filters of `leaflets.py`, the vegetation mask (a* for
+  cowpea, ExG for sorghum and tomato) and the config file. `raster.run` picks the species' config from
+  `canopy.species`; `fit.fit_sparse` accepts a camera, a plant list and the in-row separation for frames that are not
+  T4 rover frames (for example one-plant synthetic scenes).
+
+- **Tomato (block C step 2, 2026-09-29).** `config/tomato.cfg` restates the library tomato (internode 0.04 m, 16 nodes,
+  phyllochron 2 d, bud break 0.25, a 0.18 m truss of 6 flowers bending -900 deg/m, flower scale 0.05, fruit 0.15,
+  phenology 40/5/5/30) with the benchmark library start's means; its active camera is the synthetic benchmark's 720 px
+  nadir view (sun, no rover), and the TomatoWUR variant is the closing override block. `flower.peduncle_pitch` and
+  `flower.peduncle_curvature` apply to non-cowpea species when given. The species table carries tomato's age window
+  (DAP 10-90), 1.5 m beds with single or paired rows (`row_pattern`) and 0.45 m in-row spacing, and 7 leaflets per leaf.
+- **Posed camera (`camera.pose`).** The label rasterizer takes a full camera pose: 12 comma-separated numbers, the eye
+  and the image-right, image-up and backward axes, in the twin frame. Absent, the nadir camera is used and every map is
+  unchanged. `twin/real.py` builds it for TomatoWUR (`wur_camera`, `wur_view`, `pose_overrides`, `no_rover_mask`);
+  `fit.fit_sparse` places a plant that carries `ground_xy` at that known base; `soil.soil_overrides(soil_map=False)`
+  leaves the library soil for frames without a soil map.
+- **Bean (2026-09-30).** `canopy.species bean` loads the library bean, built like cowpea: a one-node `unifoliate` base
+  shoot carrying the `trifoliate` main stem, which the overrides go to. It keeps its library organs (textured
+  trifoliate leaflets, `BeanFlowerPrototype`, `BeanFruitPrototype`) and phenology (40/5/5/30 d); flowers are classes 2
+  and 3 and the pod class 5 in the label maps. `config/bean.cfg` is the library bean with the means of the Digital-Crops
+  generator's `params_bean.json` (bud break 0.35, gravitropic curvature -350 deg/m, leaf pitch 15 deg, petiole pitch
+  35 deg, internode pitch 12.5 deg, flower bud break 0.45, fruit set 0.75) and the generator's middle genotype,
+  spreading (0.045 m internodes, 10 nodes); its active camera is the synthetic benchmark's 720 px nadir view (sun, no
+  rover), and the T4 rover variant is the closing override block. The species table carries bean's age window (DAP
+  10-100), 0.76 m rows with an assumed 0.10 m in-row spacing, 3 leaflets per leaf and the ExG mask.

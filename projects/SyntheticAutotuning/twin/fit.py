@@ -120,8 +120,10 @@ class Target:
         return out
 
     def downsampled(self, scale):
-        """Vegetation and validity masks at the rasterizer's scale."""
-        w, h = int(round(R.WIDTH * scale)), int(round(R.HEIGHT * scale))
+        """Vegetation and validity masks at the rasterizer's scale (the frame's own size: the T4 frame is
+        R.WIDTH x R.HEIGHT, a synthetic benchmark frame 720 x 720)."""
+        H0, W0 = self.veg.shape
+        w, h = int(round(W0 * scale)), int(round(H0 * scale))
         veg = cv2.resize(self.veg.astype(np.uint8), (w, h), interpolation=cv2.INTER_AREA) > 0.5
         valid = cv2.resize(self.valid.astype(np.uint8), (w, h), interpolation=cv2.INTER_AREA) > 0.5
         src = getattr(self, "plant_labels", self.labels)
@@ -260,7 +262,7 @@ def refine_sites(sites, labels_s, ov, cand_dir, ages, yaw_step_deg, W, H, worker
 
 def fit_sparse(target, ov, workdir, ages=(6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 30, 35, 40, 46), n_seeds=12,
                yaw_step_deg=30, table_seeds=(1, 2, 3, 4), min_area_px=1500, refine=True, workers=6, log=print, scores=None,
-               pin_age=None, pin_age_jitter=0.0):
+               pin_age=None, pin_age_jitter=0.0, camera=None, min_sep_px=90, plants=None):
     """Stages 1-4 for a stand whose plants are separable (after row-wise splitting) in the mask.
 
     `pin_age` starts every plant at that age instead of reading it off its footprint; `pin_age_jitter` is how far stage 4
@@ -270,11 +272,18 @@ def fit_sparse(target, ov, workdir, ages=(6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 
     outline younger -- so neither is identifiable while both are free. The stand's own emergence date pins the age from
     outside the fit: five independent fits across three dates recovered 2023-06-08 within two days.
 
+    I/O (2026-09-29, block C), all defaulting to the T4 rover frame: `camera` = dict(fx=, width=, height=) for a frame
+    from another pinhole camera (a synthetic benchmark view); `min_sep_px` the in-row plant separation of the splitting;
+    `plants` a plant list in Target.plants() form (with target.plant_labels set) when the plants are given rather than
+    split from the mask (a one-plant scene); a plant with a `ground_xy` entry is placed there instead of at its mask
+    centroid's ground point (a posed, non-nadir camera, where the centroid is not above the base).
+
     If `scores` is a dict, stage 3 stores every candidate's IoU in it: scores["iou"][k] is a (n_seeds, n_yaws) list for site k,
     with the seeds in scores["seeds"][k] and the yaws in scores["yaws"]."""
     sc = px_scale(ov)
-    plants = target.plants(min_area_px)
+    plants = target.plants(min_area_px, min_sep_px=min_sep_px) if plants is None else plants
     veg_s, valid_s, labels_s = target.downsampled(sc)
+    cam = {} if camera is None else dict(fx=camera["fx"], width=camera["width"], height=camera["height"])
     H, W = veg_s.shape
     log(f"target: cover {target.cover:.3f}, {len(plants)} plants after splitting, rows at {target.rows}")
 
@@ -284,7 +293,8 @@ def fit_sparse(target, ov, workdir, ages=(6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 
     for c in plants:
         area_s = c["area_px"] * sc * sc
         age = float(pin_age) if pin_age is not None else invert_footprint(table, area_s)
-        bx, by = R.ground_xy(c["x"], c["y"], camera_height_m=ov["camera.height"])
+        # a plant whose ground position is known (TomatoWUR: the labeled stem base) carries it as ground_xy
+        bx, by = c["ground_xy"] if "ground_xy" in c else R.ground_xy(c["x"], c["y"], camera_height_m=ov["camera.height"], **cam)
         sites.append(dict(x=bx, y=by, yaw_deg=0.0, age=age, seed=0, label=c["label"], px=c["x"] * sc, py=c["y"] * sc, area_s=area_s))
     log("stage 1: ages " + " ".join(f"{s['age']:.0f}" for s in sites))
 

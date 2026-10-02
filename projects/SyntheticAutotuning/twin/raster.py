@@ -89,9 +89,18 @@ def write_layout(path, sites):
             f.write(f"{f32(s['x'])} {f32(s['y'])} {f32(s['yaw_deg'])} {f32(s['age'])} {int(s['seed'])}\n")
 
 
-def run(overrides, seed=1, folder=None, base=None, config=CONFIG, binary=BINARY, timeout=1800, read_maps=True):
+def config_for(overrides):
+    """The config file of the species the overrides name (canopy.species; twin.species): baseline.cfg for cowpea."""
+    from . import species as S
+    return "../config/" + S.get(S.of_overrides(overrides))["config"]
+
+
+def run(overrides, seed=1, folder=None, base=None, config=None, binary=BINARY, timeout=1800, read_maps=True):
     """Rasterize one scene. Returns Maps (or the stdout string when read_maps is False, as in the
-    per-site batch mode where the maps are named <base>_s<k>). `overrides` maps config key -> value."""
+    per-site batch mode where the maps are named <base>_s<k>). `overrides` maps config key -> value. `config`
+    defaults to the species' own config (config_for), which is CONFIG for cowpea."""
+    if config is None:
+        config = config_for(overrides)
     folder = os.path.abspath(folder or os.path.join(PROJECT, "twin_work", "raster"))
     os.makedirs(folder, exist_ok=True)
     base = base or f"raster_{seed:07d}"

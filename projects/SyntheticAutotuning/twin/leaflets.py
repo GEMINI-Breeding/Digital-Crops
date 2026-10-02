@@ -21,6 +21,15 @@ MIN_SOLIDITY = 0.80        # area / convex hull area: leaflets are convex, merge
 MAX_PLANT_FRACTION = 0.5   # a segment larger than this share of its plant is the plant, not a leaflet
 MIN_VEG_FRACTION = 0.75    # a SAM mask must lie mostly on the plant's vegetation
 THIN_OPEN_PX = 5           # opening diameter at raster scale 0.5 (about 7 mm at the canopy): removes petioles, keeps leaflets
+LEAFLETS_PER_LEAF = 3      # cowpea's trifoliate leaf; set_species() changes it with the two species-dependent filters
+
+
+def set_species(name):
+    """Leaflet filters and leaflets per leaf of a species (twin.species); cowpea's are the values above."""
+    global MIN_SOLIDITY, MAX_PLANT_FRACTION, LEAFLETS_PER_LEAF
+    from . import species as S
+    sp = S.get(name)
+    MIN_SOLIDITY, MAX_PLANT_FRACTION, LEAFLETS_PER_LEAF = sp["leaflet_min_solidity"], sp["leaflet_max_plant_fraction"], sp["leaflets_per_leaf"]
 
 
 def segment_stats(mask, scale=1.0):
