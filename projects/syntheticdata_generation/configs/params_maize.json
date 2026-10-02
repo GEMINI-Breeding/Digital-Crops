@@ -1,0 +1,571 @@
+{
+  "seed": 42,
+  "metadata": {
+    "year": 2025,
+    "location": "Davis",
+    "plant_type": "maize",
+    "dap": {
+      "distribution": {
+        "type": "uniform",
+        "params": {
+          "min": 15,
+          "max": 110
+        }
+      }
+    },
+    "genotype": "random"
+  },
+  "environment": {
+    "soil": {
+      "soil_color": [
+        0.61,
+        0.58,
+        0.55
+      ],
+      "use_obj_ground": true,
+      "rotate_obj": 90.0,
+      "obj_file_path": "../../../obj/dirt_rocks.obj",
+      "spectral_data": {
+        "reflectivity": {
+          "distribution": {
+            "type": "categorical",
+            "params": {
+              "categories": [
+                "soil_reflectivity_0003"
+              ]
+            }
+          }
+        }
+      },
+      "specular_exponent": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 0.0
+          }
+        }
+      }
+    },
+    "sun": {
+      "elevation_degrees": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 90.0
+          }
+        }
+      },
+      "azimuth_degrees": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 360.0
+          }
+        }
+      },
+      "shadow": true
+    }
+  },
+  "field": {
+    "layout": {
+      "mode": "manual",
+      "plot_size_x": 1.5,
+      "plot_size_y": 1.5,
+      "plot_size_z": 0.2,
+      "num_beds": 1,
+      "num_rows": 1,
+      "sampling": {
+        "num_beds": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        },
+        "num_rows": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        },
+        "size_x": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 1.0,
+              "max": 1.0
+            }
+          }
+        },
+        "size_y": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 1.0,
+              "max": 1.0
+            }
+          }
+        },
+        "plant_spacing_x": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.5,
+              "max": 0.75
+            }
+          }
+        },
+        "plant_spacing_y": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.5,
+              "max": 1.0
+            }
+          }
+        },
+        "plant_count": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 5,
+              "max": 7
+            }
+          }
+        },
+        "planting_rows": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 1,
+              "max": 2
+            }
+          }
+        }
+      }
+    },
+    "plots": [
+      {
+        "bed": 1,
+        "row": 1,
+        "plants": [
+          {
+            "x": 0,
+            "y": 0,
+            "xml": ""
+          }
+        ]
+      }
+    ]
+  },
+  "plant_properties": {
+    "leaf_optics": {
+      "number_layers": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 1.2,
+            "max": 2.0
+          }
+        }
+      },
+      "chlorophyll_content": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 30.0,
+            "max": 60.0
+          }
+        }
+      },
+      "carotenoid_content": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 5.0,
+            "max": 20.0
+          }
+        }
+      },
+      "anthocyan_content": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 2.0
+          }
+        }
+      },
+      "brown_pigments": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 0.5
+          }
+        }
+      },
+      "water_mass": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.005,
+            "max": 0.025
+          }
+        }
+      },
+      "dry_mass": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.001,
+            "max": 0.01
+          }
+        }
+      },
+      "protein": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 0.0
+          }
+        }
+      },
+      "carbon_constituents": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 0.0
+          }
+        }
+      },
+      "specular_exponent": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 0.0
+          }
+        }
+      }
+    },
+    "architecture": {
+      "shoot": {
+        "flower_bud_break_probability": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.1,
+              "max": 0.8
+            }
+          }
+        },
+        "vegetative_bud_break_probability": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.1,
+              "max": 0.6
+            }
+          }
+        },
+        "fruit_set_probability": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.5,
+              "max": 1.0
+            }
+          }
+        },
+        "internode_length_multiplier": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.8,
+              "max": 1.3
+            }
+          }
+        },
+        "elongation_rate_max": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.05,
+              "max": 0.15
+            }
+          }
+        },
+        "gravitropic_curvature": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": -800.0,
+              "max": 100.0
+            }
+          }
+        },
+        "tortuosity": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 0.0,
+              "max": 10.0
+            }
+          }
+        },
+        "insertion_angle_tip": {
+          "distribution": {
+            "type": "uniform",
+            "params": {
+              "min": 25.0,
+              "max": 65.0
+            }
+          }
+        }
+      },
+      "phytomer": {
+        "leaf": {
+          "pitch": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -5.0,
+                "max": 5.0
+              }
+            }
+          },
+          "yaw": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -25.0,
+                "max": 25.0
+              }
+            }
+          },
+          "roll": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -20.0,
+                "max": 20.0
+              }
+            }
+          },
+          "scale_multiplier": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.8,
+                "max": 1.25
+              }
+            }
+          },
+          "aspect_ratio": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.16,
+                "max": 0.22
+              }
+            }
+          },
+          "midrib_fold_fraction": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.25,
+                "max": 0.35
+              }
+            }
+          },
+          "longitudinal_curvature": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -0.4,
+                "max": -0.2
+              }
+            }
+          },
+          "wave_period": 0.0,
+          "wave_amplitude": 0.0
+        },
+        "petiole": {
+          "pitch": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -35.0,
+                "max": -25.0
+              }
+            }
+          },
+          "length_multiplier": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.75,
+                "max": 1.35
+              }
+            }
+          },
+          "radius_multiplier": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.8,
+                "max": 1.25
+              }
+            }
+          },
+          "curvature": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": -150.0,
+                "max": 150.0
+              }
+            }
+          }
+        },
+        "internode": {
+          "pitch": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.0,
+                "max": 5.0
+              }
+            }
+          },
+          "radius_multiplier": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.8,
+                "max": 1.25
+              }
+            }
+          }
+        },
+        "inflorescence": {
+          "fruit_scale_multiplier": {
+            "distribution": {
+              "type": "uniform",
+              "params": {
+                "min": 0.8,
+                "max": 1.25
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "camera": {
+    "sensor": {
+      "focal_plane_distance_difference": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.5,
+            "max": 0.5
+          }
+        }
+      },
+      "exposure_mode": "ISO",
+      "ISO": 100,
+      "shutter_speed": "1/125",
+      "lens_diameter": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0028,
+            "max": 0.0028
+          }
+        }
+      },
+      "resolution_x": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 720
+          }
+        }
+      },
+      "resolution_y": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 720
+          }
+        }
+      },
+      "model": "Basler_acA2500-20gc"
+    },
+    "positioning": {
+      "focusing_plants": false,
+      "camera_height": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 5.0,
+            "max": 5.0
+          }
+        }
+      },
+      "distance_from_center": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.01,
+            "max": 0.01
+          }
+        }
+      },
+      "azimuth_angle": {
+        "distribution": {
+          "type": "uniform",
+          "params": {
+            "min": 0.0,
+            "max": 0.0
+          }
+        }
+      },
+      "lookat_offset_x": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 0.0
+          }
+        }
+      },
+      "lookat_offset_y": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 0.0
+          }
+        }
+      },
+      "lookat_offset_z": {
+        "distribution": {
+          "type": "constant",
+          "params": {
+            "value": 0.0
+          }
+        }
+      }
+    }
+  }
+}
